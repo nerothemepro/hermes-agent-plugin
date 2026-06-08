@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment and secrets
+.env
+*.env
+.env.*
+media-pipeline.env
+*.token
+*.secret
+
+# Generated media and runtime data
+generated-images/
+generated-videos/
+media-sequences/
+outputs/
+logs/
+*.log
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.png
+*.jpg
+*.jpeg
+*.webp
+!media-pipeline/test_assets/wan_i2v_smoke_input.png
+
+# Model weights / checkpoints
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+models/
+checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+*.bak.*

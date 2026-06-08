@@ -1,0 +1,493 @@
+"""Agent-facing local media tools.
+
+The tool intentionally wraps the existing media-pipeline CLI instead of exposing
+terminal access to the model. It verifies that the pipeline returns a real file
+inside /opt/data/hermes/generated-videos before handing the path back to Hermes.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from tools.registry import tool_error, tool_result
+
+PIPELINE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video.py")
+SEQUENCE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video_sequence.py")
+DEFAULT_ENV_FILE = Path("/opt/data/hermes/media-pipeline.env")
+DEFAULT_VIDEO_DIR = Path("/opt/data/hermes/generated-videos")
+SMOKE_IMAGE = Path("/workspace/projects/media-pipeline/test_assets/wan_i2v_smoke_input.png")
+ALLOWED_VIDEO_DIRS = (DEFAULT_VIDEO_DIR.resolve(),)
+
+GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
+    "name": "generate_video_sequence",
+    "description": (
+        "Generate a longer multi-shot local video through the user's ComfyUI + Wan2.1 pipeline. "
+        "Use this for action sequences, multiple shots, or 15-30 second videos. For anime action, "
+        "create original Japanese shonen anime sword-fight scenes with close-ups, dynamic camera "
+        "movement, readable choreography, elemental effects, and no copyrighted characters, text, "
+        "watermark, logo, or gore. Default duration is 20 seconds, default style_preset is "
+        "anime_action, default control_mode is FLF2V start/end keyframes, and default "
+        "postprocess is ffmpeg_fps at 16fps. The tool returns a MEDIA:/absolute/path directive."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "User's video idea. Short ideas are allowed; the sequence pipeline expands them "
+                    "into original anime action shot prompts internally."
+                ),
+            },
+            "duration_seconds": {
+                "type": "integer",
+                "default": 20,
+                "minimum": 8,
+                "maximum": 30,
+                "description": "Requested final duration. Defaults to 20 seconds; values are clamped to 8-30.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "quality"],
+                "default": "quality",
+                "description": "quality for real videos; test for short plumbing checks.",
+            },
+            "shot_count": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 15,
+                "description": "Optional explicit shot count. Use 0 or omit for anime_action auto timing, e.g. about 4 shots for 8s and 6 shots for 12s.",
+            },
+            "shot_duration_seconds": {
+                "type": "number",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 4,
+                "description": "Optional target source duration per shot. Omit for safe defaults; anime action normally uses short 1.5-2.5s shots.",
+            },
+            "frames_per_shot": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 33,
+                "description": "Optional Wan frame count per shot. Omit for safe defaults; anime_action uses shorter shots than the old 33-frame baseline.",
+            },
+            "wan_steps_per_shot": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 30,
+                "description": "Optional Wan sampler steps per shot. Omit for safe defaults; test mode stays low for plumbing checks.",
+            },
+            "motion_profile": {
+                "type": "string",
+                "enum": ["rapid", "balanced", "dramatic", "impact"],
+                "default": "balanced",
+                "description": "Anime action shot timing preset. balanced is the safe default; rapid cuts faster, dramatic holds longer, impact favors stronger action beats.",
+            },
+            "style": {
+                "type": "string",
+                "default": "original_japanese_anime_action",
+                "description": "Backward-compatible style label. Prefer style_preset for new calls.",
+            },
+            "style_preset": {
+                "type": "string",
+                "enum": ["default", "anime_action"],
+                "default": "anime_action",
+                "description": "anime_action removes photoreal language and uses original Japanese 2D cel-shaded action prompts.",
+            },
+            "control_mode": {
+                "type": "string",
+                "enum": ["i2v_last_frame", "flf2v"],
+                "default": "flf2v",
+                "description": "flf2v generates start/end keyframes per shot; i2v_last_frame keeps the older last-frame chaining path.",
+            },
+            "postprocess": {
+                "type": "string",
+                "enum": ["none", "ffmpeg_fps", "frame_interpolate"],
+                "default": "ffmpeg_fps",
+                "description": "Final FPS stage. frame_interpolate falls back with a warning if the interpolation model is missing.",
+            },
+            "target_fps": {
+                "type": "integer",
+                "default": 16,
+                "minimum": 8,
+                "maximum": 24,
+                "description": "Final FPS target for post-processing. Defaults to 16.",
+            },
+            "continuity": {
+                "type": "string",
+                "enum": ["last_frame", "independent"],
+                "default": "last_frame",
+                "description": "last_frame chains each shot into the next; independent renders standalone shots then stitches them.",
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "default": 14400,
+                "minimum": 300,
+                "maximum": 28800,
+                "description": "Maximum wall-clock time for the full sequence.",
+            },
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    },
+}
+
+
+GENERATE_VIDEO_SCHEMA: dict[str, Any] = {
+    "name": "generate_video",
+    "description": (
+        "Generate a local video through the user's ComfyUI + Wan2.1 media pipeline. "
+        "Use this when the user asks to create/generate/render a video locally. "
+        "For normal user requests, expand short ideas into a detailed English visual prompt "
+        "before calling this tool: include clear subject/action, cinematic anime/photoreal style "
+        "when relevant, camera movement, close-up details, lighting, smooth motion, and avoid "
+        "text, watermark, gore, or too many scene events in one short clip. "
+        "Default to mode=quality and do not set use_smoke_image for real videos. "
+        "The tool saves the final mp4 under /opt/data/hermes/generated-videos and "
+        "returns a MEDIA:/absolute/path directive suitable for Telegram delivery."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "Detailed English video prompt. If the user only gives a short idea, "
+                    "rewrite it into a visual prompt with action, style, camera movement, "
+                    "lighting, close-up detail, smooth motion, and negative constraints "
+                    "such as no text, no watermark, and no gore."
+                ),
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "quality"],
+                "default": "quality",
+                "description": "quality is the default for real user videos; test is only for short smoke tests.",
+            },
+            "style_preset": {
+                "type": "string",
+                "enum": ["default", "anime_action"],
+                "default": "default",
+                "description": "Use anime_action for original 2D cel-shaded anime action; default preserves the older prompt style.",
+            },
+            "input_image_path": {
+                "type": "string",
+                "description": (
+                    "Optional existing keyframe image path. When provided, the tool skips "
+                    "Flux/keyframe generation and runs Wan2.1 I2V directly."
+                ),
+            },
+            "use_smoke_image": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "For smoke tests only: use the bundled Wan I2V smoke image if no "
+                    "input_image_path is provided. Do not use for real user videos."
+                ),
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "default": 1800,
+                "minimum": 60,
+                "maximum": 7200,
+                "description": "Maximum wall-clock time to wait for the local pipeline.",
+            },
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _coerce_mode(value: Any) -> str:
+    mode = str(value or "quality").strip().lower()
+    return mode if mode in {"test", "quality"} else "quality"
+
+
+def _coerce_timeout(value: Any) -> int:
+    try:
+        timeout = int(value)
+    except Exception:
+        timeout = 1800
+    return max(60, min(7200, timeout))
+
+
+def _parse_pipeline_json(stdout: str, stderr: str) -> dict[str, Any]:
+    for raw in (stdout, stderr):
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise RuntimeError(
+        "media pipeline did not return JSON; "
+        f"stdout={stdout[-1000:]!r}; stderr={stderr[-1000:]!r}"
+    )
+
+
+def _verify_video_path(raw_path: Any) -> tuple[Path, int]:
+    if not raw_path:
+        raise RuntimeError("media pipeline completed without video_path")
+    path = Path(str(raw_path)).expanduser()
+    if not path.is_absolute():
+        raise RuntimeError(f"video_path is not absolute: {path}")
+    resolved = path.resolve()
+    if not any(resolved == base or base in resolved.parents for base in ALLOWED_VIDEO_DIRS):
+        raise RuntimeError(f"video_path is outside allowed output dirs: {resolved}")
+    if resolved.suffix.lower() not in {".mp4", ".webm", ".mov", ".mkv"}:
+        raise RuntimeError(f"video_path is not a video file: {resolved}")
+    if not resolved.exists() or not resolved.is_file():
+        raise RuntimeError(f"video file does not exist: {resolved}")
+    size = resolved.stat().st_size
+    if size <= 0:
+        raise RuntimeError(f"video file is empty: {resolved}")
+    return resolved, size
+
+
+def handle_generate_video(args: dict[str, Any], **kw) -> str:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return tool_error("prompt is required")
+    if not PIPELINE_SCRIPT.exists():
+        return tool_error(f"media pipeline script not found: {PIPELINE_SCRIPT}")
+
+    mode = _coerce_mode(args.get("mode"))
+    style_preset = _coerce_style_preset(args.get("style_preset") or "default")
+    timeout = _coerce_timeout(args.get("timeout_seconds"))
+    input_image = str(args.get("input_image_path") or "").strip()
+    if not input_image and bool(args.get("use_smoke_image")):
+        input_image = str(SMOKE_IMAGE)
+
+    cmd = [sys.executable, str(PIPELINE_SCRIPT), "--prompt", prompt, "--mode", mode, "--style-preset", style_preset]
+    if DEFAULT_ENV_FILE.exists():
+        cmd.extend(["--env-file", str(DEFAULT_ENV_FILE)])
+    if input_image:
+        cmd.extend(["--input-image", input_image])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PIPELINE_SCRIPT.parent),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        payload = _parse_pipeline_json(proc.stdout, proc.stderr)
+        if proc.returncode != 0 or payload.get("status") != "completed":
+            errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+            detail = "; ".join(str(item) for item in errors) or proc.stderr[-1200:] or proc.stdout[-1200:]
+            return tool_error(f"generate_video failed: {detail}")
+        video_path, size = _verify_video_path(payload.get("video_path"))
+        image_path = payload.get("image_path")
+        result = {
+            "success": True,
+            "status": "completed",
+            "video_path": str(video_path),
+            "media": f"MEDIA:{video_path}",
+            "send_to_user": f"MEDIA:{video_path}",
+            "size_bytes": size,
+            "image_path": image_path,
+            "mode": mode,
+            "style_preset": payload.get("style_preset"),
+            "prompt_used": payload.get("prompt_used"),
+            "comfyui": payload.get("comfyui"),
+            "note": "Send the media field verbatim to deliver the video on Telegram.",
+        }
+        return tool_result(result)
+    except subprocess.TimeoutExpired:
+        return tool_error(f"generate_video timed out after {timeout} seconds")
+    except Exception as exc:
+        return tool_error(f"generate_video failed: {type(exc).__name__}: {exc}")
+
+def _coerce_duration(value: Any) -> int:
+    try:
+        duration = int(value)
+    except Exception:
+        duration = 20
+    return max(8, min(30, duration))
+
+
+def _coerce_sequence_timeout(value: Any) -> int:
+    try:
+        timeout = int(value)
+    except Exception:
+        timeout = 14400
+    return max(300, min(28800, timeout))
+
+
+def _coerce_continuity(value: Any) -> str:
+    continuity = str(value or "last_frame").strip().lower()
+    return continuity if continuity in {"last_frame", "independent"} else "last_frame"
+
+
+def _coerce_style(value: Any) -> str:
+    style = str(value or "original_japanese_anime_action").strip()
+    return style or "original_japanese_anime_action"
+
+
+def _coerce_style_preset(value: Any) -> str:
+    preset = str(value or "anime_action").strip().lower()
+    return preset if preset in {"default", "anime_action"} else "anime_action"
+
+
+def _coerce_control_mode(value: Any) -> str:
+    mode = str(value or "flf2v").strip().lower()
+    return mode if mode in {"i2v_last_frame", "flf2v"} else "flf2v"
+
+
+def _coerce_postprocess(value: Any) -> str:
+    mode = str(value or "ffmpeg_fps").strip().lower()
+    return mode if mode in {"none", "ffmpeg_fps", "frame_interpolate"} else "ffmpeg_fps"
+
+
+def _coerce_target_fps(value: Any) -> int:
+    try:
+        fps = int(value)
+    except Exception:
+        fps = 16
+    return max(8, min(24, fps))
+
+
+def _coerce_optional_int(value: Any, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        number = 0
+    return max(low, min(high, number))
+
+
+def _coerce_optional_float(value: Any, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except Exception:
+        number = 0.0
+    return max(low, min(high, number))
+
+
+def _coerce_motion_profile(value: Any) -> str:
+    profile = str(value or "balanced").strip().lower()
+    return profile if profile in {"rapid", "balanced", "dramatic", "impact"} else "balanced"
+
+
+def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return tool_error("prompt is required")
+    if not SEQUENCE_SCRIPT.exists():
+        return tool_error(f"media sequence script not found: {SEQUENCE_SCRIPT}")
+
+    mode = _coerce_mode(args.get("mode"))
+    duration = _coerce_duration(args.get("duration_seconds"))
+    timeout = _coerce_sequence_timeout(args.get("timeout_seconds"))
+    continuity = _coerce_continuity(args.get("continuity"))
+    style = _coerce_style(args.get("style"))
+    style_preset = _coerce_style_preset(args.get("style_preset"))
+    control_mode = _coerce_control_mode(args.get("control_mode"))
+    postprocess = _coerce_postprocess(args.get("postprocess"))
+    target_fps = _coerce_target_fps(args.get("target_fps"))
+    shot_count = _coerce_optional_int(args.get("shot_count"), 0, 15)
+    shot_duration_seconds = _coerce_optional_float(args.get("shot_duration_seconds"), 0.0, 4.0)
+    frames_per_shot = _coerce_optional_int(args.get("frames_per_shot"), 0, 33)
+    wan_steps_per_shot = _coerce_optional_int(args.get("wan_steps_per_shot"), 0, 30)
+    motion_profile = _coerce_motion_profile(args.get("motion_profile"))
+
+    cmd = [
+        sys.executable,
+        str(SEQUENCE_SCRIPT),
+        "--prompt",
+        prompt,
+        "--duration-seconds",
+        str(duration),
+        "--mode",
+        mode,
+        "--style",
+        style,
+        "--style-preset",
+        style_preset,
+        "--control-mode",
+        control_mode,
+        "--continuity",
+        continuity,
+        "--postprocess",
+        postprocess,
+        "--target-fps",
+        str(target_fps),
+        "--motion-profile",
+        motion_profile,
+    ]
+    if shot_count > 0:
+        cmd.extend(["--shot-count", str(shot_count)])
+    if shot_duration_seconds > 0:
+        cmd.extend(["--shot-duration-seconds", str(shot_duration_seconds)])
+    if frames_per_shot > 0:
+        cmd.extend(["--frames-per-shot", str(frames_per_shot)])
+    if wan_steps_per_shot > 0:
+        cmd.extend(["--wan-steps-per-shot", str(wan_steps_per_shot)])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(SEQUENCE_SCRIPT.parent),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        payload = _parse_pipeline_json(proc.stdout, proc.stderr)
+        if proc.returncode != 0 or payload.get("status") != "completed":
+            errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+            detail = "; ".join(str(item) for item in errors) or proc.stderr[-1600:] or proc.stdout[-1600:]
+            return tool_error(f"generate_video_sequence failed: {detail}")
+        video_path, size = _verify_video_path(payload.get("video_path"))
+        manifest_path = payload.get("manifest_path")
+        result = {
+            "success": True,
+            "status": "completed",
+            "video_path": str(video_path),
+            "media": f"MEDIA:{video_path}",
+            "send_to_user": f"MEDIA:{video_path}",
+            "size_bytes": size,
+            "manifest_path": manifest_path,
+            "duration_seconds": payload.get("duration_seconds_requested"),
+            "duration_seconds_actual": payload.get("duration_seconds_actual"),
+            "duration_seconds_planned_source": payload.get("duration_seconds_planned_source"),
+            "shot_count": payload.get("shot_count"),
+            "shot_duration_seconds": payload.get("shot_duration_seconds"),
+            "frames_per_shot": payload.get("frames_per_shot"),
+            "wan_steps_per_shot": payload.get("wan_steps_per_shot"),
+            "motion_profile": payload.get("motion_profile"),
+            "runtime_seconds": payload.get("runtime_seconds"),
+            "continuity": payload.get("continuity"),
+            "mode": payload.get("mode"),
+            "style_preset": payload.get("style_preset"),
+            "control_mode": payload.get("control_mode"),
+            "postprocess_requested": payload.get("postprocess_requested"),
+            "postprocess_mode": payload.get("postprocess_mode"),
+            "effective_postprocess_mode": payload.get("effective_postprocess_mode"),
+            "interpolation_model_name": payload.get("interpolation_model_name"),
+            "source_fps": payload.get("source_fps"),
+            "target_fps": payload.get("target_fps"),
+            "actual_fps": payload.get("actual_fps"),
+            "postprocessed_video_path": payload.get("postprocessed_video_path"),
+            "warnings": payload.get("warnings"),
+            "shot_videos": [shot.get("video_path") for shot in payload.get("shots", []) if isinstance(shot, dict)],
+            "note": "Send the media field verbatim to deliver the final stitched video on Telegram.",
+        }
+        return tool_result(result)
+    except subprocess.TimeoutExpired:
+        return tool_error(f"generate_video_sequence timed out after {timeout} seconds")
+    except Exception as exc:
+        return tool_error(f"generate_video_sequence failed: {type(exc).__name__}: {exc}")
+
