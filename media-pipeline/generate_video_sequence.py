@@ -44,6 +44,12 @@ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mov', '.mkv'}
 BASE_SOURCE_FPS = 8
 DEFAULT_COMFYUI_BASE_URL = 'http://host.docker.internal:8188'
+ANIME_ACTION_DEFAULT_CHARACTER_NOTE = (
+    'Fighter A: black hair, deep indigo robe, white sash, water-blue katana trail. '
+    'Fighter B: white hair, charcoal robe, red scarf, fire-red katana trail. '
+    'Only these two original adult anime swordfighters appear in every shot. '
+    'Same faces, robes, katanas, colors across all shots. No logos.'
+)
 
 
 
@@ -534,17 +540,21 @@ def postprocess_video(video_path: Path, output_path: Path, mode: str, target_fps
                 effective_mode = 'ffmpeg_fps'
             else:
                 multiplier = max(2, min(16, target_fps // source_fps))
-                upload_name = f'hermes_interp_{int(time.time())}_{uuid.uuid4().hex[:8]}{video_path.suffix.lower()}'
-                eprint(f'[interpolate] uploading source video to ComfyUI input as {upload_name}')
-                video_name = upload_video_to_comfy(comfy_url, video_path, upload_name)
-                prefix = f'hermes_video/{output_path.stem}'
-                workflow = build_frame_interpolation_workflow(video_name, interpolation_model_name, target_fps, multiplier, prefix)
-                eprint(f'[interpolate] model={interpolation_model_name} multiplier={multiplier}')
-                prompt_id = queue_comfy(comfy_url, workflow, timeout=30)
-                history = poll_comfy(comfy_url, prompt_id, timeout_seconds=900, poll_seconds=2.0)
-                ref = find_output_ref(history, VIDEO_EXTENSIONS)
-                final_path = download_comfy_file(comfy_url, ref, output_path)
-                return final_path, 'frame_interpolate', interpolation_model_name
+                try:
+                    upload_name = f'hermes_interp_{int(time.time())}_{uuid.uuid4().hex[:8]}{video_path.suffix.lower()}'
+                    eprint(f'[interpolate] uploading source video to ComfyUI input as {upload_name}')
+                    video_name = upload_video_to_comfy(comfy_url, video_path, upload_name)
+                    prefix = f'hermes_video/{output_path.stem}'
+                    workflow = build_frame_interpolation_workflow(video_name, interpolation_model_name, target_fps, multiplier, prefix)
+                    eprint(f'[interpolate] model={interpolation_model_name} multiplier={multiplier}')
+                    prompt_id = queue_comfy(comfy_url, workflow, timeout=30)
+                    history = poll_comfy(comfy_url, prompt_id, timeout_seconds=900, poll_seconds=2.0)
+                    ref = find_output_ref(history, VIDEO_EXTENSIONS)
+                    final_path = download_comfy_file(comfy_url, ref, output_path)
+                    return final_path, 'frame_interpolate', interpolation_model_name
+                except SequenceError as exc:
+                    warnings.append(f'frame interpolation failed with model {interpolation_model_name}; fell back to ffmpeg_fps: {exc}')
+                    effective_mode = 'ffmpeg_fps'
         else:
             warnings.append('frame interpolation model missing; fell back to ffmpeg_fps')
             effective_mode = 'ffmpeg_fps'
@@ -579,34 +589,166 @@ def workflow_has_node(path: Path, class_type: str) -> bool:
     return any(isinstance(node, dict) and node.get('class_type') == class_type for node in workflow.values())
 
 
-def build_storyboard(prompt: str, duration_seconds: int, shot_count: int, style_preset: str, shot_duration_seconds: float) -> list[dict[str, Any]]:
+def note_has_concrete_visual_traits(note: str) -> bool:
+    lowered = note.lower()
+    trait_terms = (
+        'hair',
+        'robe',
+        'sash',
+        'scarf',
+        'katana',
+        'sword',
+        'color',
+        'blue',
+        'red',
+        'white',
+        'black',
+        'charcoal',
+        'indigo',
+        'fire',
+        'water',
+        'face',
+    )
+    return sum(1 for term in trait_terms if term in lowered) >= 3
+
+
+def default_character_consistency_note(user_note: str) -> str:
+    note = " ".join((user_note or "").strip().split())
+    if not note:
+        return ANIME_ACTION_DEFAULT_CHARACTER_NOTE
+    if len(note) < 80 or not note_has_concrete_visual_traits(note):
+        return f'{note} {ANIME_ACTION_DEFAULT_CHARACTER_NOTE}'
+    return note
+
+
+def resolve_keyframe_frame_mode(requested_mode: str, style_preset: str, keyframe_engine: str) -> str:
+    requested = str(requested_mode or '').strip().lower()
+    if requested in {'single_scene', 'stylized_panel'}:
+        return requested
+    if style_preset == 'anime_action' and keyframe_engine == 'animagine':
+        return 'single_scene'
+    return ''
+
+
+def composition_for_title(title: str, requested_profile: str) -> str:
+    if requested_profile and requested_profile != 'auto':
+        return requested_profile
+    lowered = title.lower()
+    if any(term in lowered for term in ('eyes', 'hand', 'draw')):
+        return 'closeup'
+    if any(term in lowered for term in ('clash', 'impact', 'slash')):
+        return 'impact'
+    if any(term in lowered for term in ('stance', 'aftermath')):
+        return 'establishing'
+    return 'action'
+
+
+def keyframe_phase3_suffix(composition_profile: str, shot_prompt_strength: str, character_note: str) -> str:
+    profile_words = {
+        'establishing': 'wide composition with foreground leaves, midground fighters, moonlit bamboo background, clear two-character spacing',
+        'closeup': 'close-up composition with eyes, hands, and katana hilt readable, simplified background, sharp focal silhouette',
+        'action': 'dynamic action composition with full-body readable sword pose, diagonal motion path, separated foreground and background',
+        'impact': 'cinematic impact composition with blade contact point, sparks, water and fire arcs, silhouettes readable before effects',
+        'auto': 'balanced composition with clear foreground, midground action, separated background, readable sword pose',
+    }.get(composition_profile, 'balanced composition with readable sword pose')
+    strength_words = {
+        'light': 'restrained effects, clean pose, no clutter',
+        'balanced': 'pose clarity prioritized, effects controlled around the silhouette',
+        'strong': 'extra strict anatomy, no tangled limbs, no melted swords, strong graphic silhouette, impact clarity',
+    }.get(shot_prompt_strength, 'pose clarity prioritized')
+    return (
+        f'{profile_words}. {strength_words}. Anime production keyframe, clean cel-shaded line art, crisp ink contour, '
+        f'visible katana geometry, readable hands and face, strong silhouette, foreground/midground/background separation. '
+        f'Character consistency: {character_note}. Flat 2D anime illustration only, no text, no watermark, no logo, no gore, no 3D render'
+    )
+
+
+ACTION_STORYBOARD_KEYWORDS = (
+    'fight', 'fighting', 'clash', 'battle', 'slash', 'counter', 'dodge', 'katana', 'sword', 'duel'
+)
+
+
+def detect_action_keywords(prompt: str) -> list[str]:
+    lowered = prompt.lower()
+    return [keyword for keyword in ACTION_STORYBOARD_KEYWORDS if keyword in lowered]
+
+
+def resolve_storyboard_mode(style_preset: str, requested_mode: str, shot_count: int, action_keywords: list[str]) -> str:
+    requested = (requested_mode or 'auto').strip().lower()
+    if requested in {'intro_action', 'action_core', 'full_arc'}:
+        return requested
+    if style_preset != 'anime_action':
+        return 'auto'
+    if not action_keywords:
+        return 'intro_action'
+    if shot_count >= 8:
+        return 'full_arc'
+    return 'action_core'
+
+
+def select_anime_templates(templates_by_title: dict[str, tuple[str, str, str]], shot_count: int, storyboard_mode: str) -> list[tuple[str, str, str]]:
+    intro_sequence = [
+        'establishing stance',
+        'close-up eyes',
+        'hand katana draw',
+        'dash',
+        'blade clash',
+        'dodge counter',
+        'elemental slash',
+        'aftermath pose',
+    ]
+    action_core_4 = ['close-up eyes', 'dash', 'blade clash', 'dodge counter']
+    action_core_6 = ['close-up eyes', 'hand katana draw', 'dash', 'blade clash', 'dodge counter', 'elemental slash']
+    full_arc = ['close-up eyes', 'hand katana draw', 'dash', 'blade clash', 'dodge counter', 'counter slash', 'elemental slash', 'aftermath pose']
+
+    if storyboard_mode == 'action_core':
+        sequence = action_core_4 if shot_count <= 4 else action_core_6 if shot_count <= 6 else full_arc
+    elif storyboard_mode == 'full_arc':
+        sequence = full_arc
+    else:
+        sequence = intro_sequence
+
+    titles: list[str] = []
+    while len(titles) < shot_count:
+        titles.extend(sequence)
+    return [templates_by_title[title] for title in titles[:shot_count]]
+
+
+def build_storyboard(prompt: str, duration_seconds: int, shot_count: int, style_preset: str, shot_duration_seconds: float, keyframe_quality_preset: str = 'flux_default', shot_prompt_strength: str = 'balanced', character_consistency_note: str = '', composition_profile: str = 'auto', storyboard_mode: str = 'auto') -> list[dict[str, Any]]:
     user_idea = prompt.strip()
     shot_duration = round(shot_duration_seconds, 2)
     if style_preset == 'anime_action':
         action_base = 'two original animated samurai warriors with distinct non-copyrighted robes and katanas in a moonlit bamboo forest'
-        templates = [
-            ('establishing stance', 'wide establishing stance in moonlit bamboo, both original samurai squared off on wet leaves, clear full-body silhouettes', 'both fighters settle into opposing guards as bamboo leaves drift through the frame'),
-            ('close-up eyes', 'extreme close-up of intense anime eyes under moonlight, brows tense, reflected blade edge visible', 'the eyes snap toward the opponent with a sharp glint and a brief impact-frame hold'),
-            ('hand katana draw', 'close-up hand and katana draw, thumb pushing the guard, fingers tight on the wrapped hilt', 'the blade slides out of the scabbard with a clean arc of water and fire light'),
-            ('dash', 'wide side-tracking dash between bamboo trunks, robes and hair trailing, feet kicking wet leaves', 'both fighters accelerate into the first exchange with strong anime speed-line motion cues'),
-            ('blade clash', 'diagonal blade clash impact, crossed katanas, sparks at the contact point, silhouettes readable', 'the blades lock and explode into sparks with water and fire trails splitting the frame'),
-            ('dodge counter', 'low-angle dodge under a sweeping cut, one fighter sliding on one knee, counter blade ready', 'the dodging fighter slips under the slash and counters upward from hip level'),
-            ('elemental slash', 'elemental slash burst, one katana carving a bright water trail and the other a fire trail', 'the slash arcs across the frame in a readable pose-to-pose motion with dramatic compositing'),
-            ('aftermath pose', 'aftermath pose in low mist, both fighters sliding apart with glowing blades and sharp silhouettes', 'both fighters freeze after the exchange, leaves suspended, eyes still locked'),
-        ]
-        selected = [templates[index % len(templates)] for index in range(shot_count)]
+        templates_by_title = {
+            'establishing stance': ('establishing stance', 'wide establishing stance in moonlit bamboo, both original samurai squared off on wet leaves, clear full-body silhouettes', 'both fighters settle into opposing guards as bamboo leaves drift through the frame'),
+            'close-up eyes': ('close-up eyes', 'single camera close-up of intense anime eyes under moonlight, one or two faces in one continuous frame, reflected blade edge visible, unified close-up framing', 'the eyes snap toward the opponent in the same continuous close-up frame with a sharp glint and a brief action hold'),
+            'hand katana draw': ('hand katana draw', 'single camera close-up hand and katana draw, thumb pushing the guard, fingers tight on the wrapped hilt, unified close-up framing', 'the blade slides out of the scabbard with a clean arc of water and fire light in one continuous frame'),
+            'dash': ('dash', 'wide medium-wide side view dash between bamboo trunks, both fighters visible, clear ground plane, robes and hair trailing, feet kicking wet leaves', 'both fighters launch toward each other in one continuous scene and enter the clash line with controlled motion cues'),
+            'blade clash': ('blade clash', 'medium-wide cinematic blade clash, both fighters visible in one shared physical space, crossed katanas centered, sparks controlled at the contact point, silhouettes readable', 'the blades lock in one continuous frame with controlled sparks and water and fire trails around the silhouettes'),
+            'dodge counter': ('dodge counter', 'low-angle full-body dodge under a sweeping cut, attacker and dodging fighter both visible, counter blade ready, clear body pose', 'the dodging fighter slips under the slash and counters upward from hip level while both fighters remain visible'),
+            'counter slash': ('counter slash', 'low-angle counter slash follow-through, foreground katana arc crossing the frame, opponent recoiling but readable', 'the counter slash finishes with a sharp silhouette and controlled water and fire energy trails'),
+            'elemental slash': ('elemental slash', 'elemental slash burst, one katana carving a bright water trail and the other a fire trail', 'the slash arcs across the frame in a readable pose-to-pose motion with dramatic compositing'),
+            'aftermath pose': ('aftermath pose', 'aftermath pose in low mist, both fighters sliding apart with glowing blades and sharp silhouettes', 'both fighters freeze after the exchange, leaves suspended, eyes still locked'),
+        }
+        selected = select_anime_templates(templates_by_title, shot_count, storyboard_mode)
         storyboard = []
+        character_note = default_character_consistency_note(character_consistency_note)
         for index, (title, start_action, end_action) in enumerate(selected, start=1):
+            shot_composition = composition_for_title(title, composition_profile)
             base = f'{action_base}. User idea: {user_idea}. Shot {index}/{shot_count}: '
             style = 'original Japanese shonen anime action only, clean line art, cel shading, sakuga-style motion cues, sharp silhouettes, readable sword pose, dramatic compositing, no gore, no captions, no logo'
+            phase3 = keyframe_phase3_suffix(shot_composition, shot_prompt_strength, character_note) if keyframe_quality_preset == 'anime_action_v2' else ''
+            suffix = f'{style}. {phase3}' if phase3 else style
             storyboard.append({
                 'index': index,
                 'title': title,
+                'storyboard_mode': storyboard_mode,
+                'composition_profile': shot_composition,
                 'duration_seconds': shot_duration,
-                'start_prompt': f'{base}{start_action}. {style}',
-                'end_prompt': f'{base}{end_action}. {style}',
+                'start_prompt': f'{base}{start_action}. {suffix}',
+                'end_prompt': f'{base}{end_action}. {suffix}',
                 'video_prompt': f'{base}transition from {start_action} to {end_action}, coherent sword choreography, elemental water and fire trails, stable original character designs. {style}',
-                'prompt': f'{base}{start_action}; then {end_action}. {style}',
+                'prompt': f'{base}{start_action}; then {end_action}. {suffix}',
             })
         return storyboard
 
@@ -623,7 +765,6 @@ def build_storyboard(prompt: str, duration_seconds: int, shot_count: int, style_
         storyboard.append({'index': index, 'title': title, 'duration_seconds': shot_duration, 'start_prompt': prompt_text, 'end_prompt': prompt_text, 'video_prompt': prompt_text, 'prompt': prompt_text})
     return storyboard
 
-
 def is_transient_shot_error(detail: str) -> bool:
     lowered = detail.lower()
     needles = (
@@ -638,14 +779,19 @@ def is_transient_shot_error(detail: str) -> bool:
     return any(item in lowered for item in needles)
 
 
-def run_single_shot(prompt: str, mode: str, seed: int, input_image: Path | None, end_image: Path | None, style_preset: str, control_mode: str, shot_prompt_type: str, keyframe_only: bool, frames_per_shot: int, wan_steps_per_shot: int, timeout: int) -> dict[str, Any]:
-    cmd = [sys.executable, str(PIPELINE_SCRIPT), '--prompt', prompt, '--mode', mode, '--seed', str(seed), '--style-preset', style_preset, '--shot-prompt-type', shot_prompt_type]
+def run_single_shot(prompt: str, mode: str, seed: int, input_image: Path | None, end_image: Path | None, style_preset: str, control_mode: str, shot_prompt_type: str, keyframe_only: bool, frames_per_shot: int, wan_steps_per_shot: int, keyframe_quality_preset: str, composition_profile: str, shot_prompt_strength: str, character_consistency_note: str, keyframe_engine: str, keyframe_frame_mode: str, timeout: int) -> dict[str, Any]:
+    cmd = [sys.executable, str(PIPELINE_SCRIPT), '--prompt', prompt, '--mode', mode, '--seed', str(seed), '--style-preset', style_preset, '--shot-prompt-type', shot_prompt_type, '--keyframe-engine', keyframe_engine]
+    if keyframe_frame_mode:
+        cmd.extend(['--keyframe-frame-mode', keyframe_frame_mode])
     if Path(DEFAULT_ENV_FILE).exists():
         cmd.extend(['--env-file', DEFAULT_ENV_FILE])
     if frames_per_shot > 0:
         cmd.extend(['--frames', str(frames_per_shot)])
     if wan_steps_per_shot > 0:
         cmd.extend(['--wan-steps', str(wan_steps_per_shot)])
+    cmd.extend(['--keyframe-quality-preset', keyframe_quality_preset, '--composition-profile', composition_profile, '--shot-prompt-strength', shot_prompt_strength])
+    if character_consistency_note:
+        cmd.extend(['--character-consistency-note', character_consistency_note])
     if keyframe_only:
         cmd.append('--keyframe-only')
     else:
@@ -722,11 +868,28 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     mode = args.mode
     style_preset = args.style_preset or ('anime_action' if args.style in {'original_japanese_anime_action', 'anime_action', ''} else 'default')
     motion_profile = str(args.motion_profile or 'balanced').strip().lower()
+    keyframe_quality_preset = str(args.keyframe_quality_preset or 'flux_default').strip().lower()
+    shot_prompt_strength = str(args.shot_prompt_strength or 'balanced').strip().lower()
+    requested_composition_profile = str(args.composition_profile or 'auto').strip().lower()
+    requested_storyboard_mode = str(args.storyboard_mode or 'auto').strip().lower()
+    keyframe_engine = str(args.keyframe_engine or 'auto').strip().lower()
+    keyframe_frame_mode = resolve_keyframe_frame_mode(args.keyframe_frame_mode, style_preset, keyframe_engine)
+    character_consistency_note = default_character_consistency_note(args.character_consistency_note) if style_preset == 'anime_action' else " ".join((args.character_consistency_note or '').strip().split())
     requested_shot_duration = max(0.0, float(args.shot_duration_seconds or 0.0))
     requested_control_mode = args.control_mode
     effective_control_mode = requested_control_mode
     warnings: list[str] = []
-    if effective_control_mode == 'flf2v' and not workflow_has_node(DEFAULT_WAN_FLF_WORKFLOW, 'WanFirstLastFrameToVideo'):
+    existing_keyframe_dir = Path(args.existing_keyframe_dir).resolve() if args.existing_keyframe_dir else None
+    if existing_keyframe_dir is not None:
+        if not existing_keyframe_dir.exists() or not existing_keyframe_dir.is_dir():
+            raise SequenceError(f'existing_keyframe_dir not found or not a directory: {existing_keyframe_dir}')
+        if effective_control_mode != 'flf2v':
+            warnings.append('existing_keyframe_dir requires flf2v; using flf2v')
+            effective_control_mode = 'flf2v'
+    if args.keyframe_only_sequence and effective_control_mode != 'flf2v':
+        warnings.append('keyframe_only_sequence requires start/end keyframes; using flf2v keyframe planning without Wan render')
+        effective_control_mode = 'flf2v'
+    if not args.keyframe_only_sequence and effective_control_mode == 'flf2v' and not workflow_has_node(DEFAULT_WAN_FLF_WORKFLOW, 'WanFirstLastFrameToVideo'):
         warnings.append(f'wan_flf2v_api.json missing or has no WanFirstLastFrameToVideo node; falling back to i2v_last_frame')
         effective_control_mode = 'i2v_last_frame'
     auto_shot_count = shot_count_for_duration(duration, mode, style_preset, motion_profile, requested_shot_duration)
@@ -750,16 +913,72 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     slug = slugify(args.prompt)
     work_dir = SEQUENCE_WORK_DIR / f'{slug}-{run_id}'
     frame_dir = work_dir / 'frames'
+    keyframe_dir = work_dir / 'keyframes'
     work_dir.mkdir(parents=True, exist_ok=True)
     frame_dir.mkdir(parents=True, exist_ok=True)
-    ffmpeg = ffmpeg_exe()
-    storyboard = build_storyboard(args.prompt, duration, shot_count, style_preset, effective_shot_duration)
+    keyframe_dir.mkdir(parents=True, exist_ok=True)
+    if args.keyframe_only_sequence:
+        try:
+            ffmpeg = ffmpeg_exe()
+        except SequenceError as exc:
+            ffmpeg = ''
+            warnings.append(f'contact sheet disabled because ffmpeg is unavailable: {exc}')
+    else:
+        ffmpeg = ffmpeg_exe()
+    target_fps = max(8, min(24, int(args.target_fps)))
+    action_keywords_detected = detect_action_keywords(args.prompt) if style_preset == 'anime_action' else []
+    storyboard_mode = resolve_storyboard_mode(style_preset, requested_storyboard_mode, shot_count, action_keywords_detected)
+    action_core_selected = style_preset == 'anime_action' and storyboard_mode == 'action_core'
+    storyboard = build_storyboard(args.prompt, duration, shot_count, style_preset, effective_shot_duration, keyframe_quality_preset, shot_prompt_strength, character_consistency_note, requested_composition_profile, storyboard_mode)
+    selected_shot_titles = [str(shot.get('title')) for shot in storyboard]
     shot_prompt_type = 'anime_action_storyboard' if style_preset == 'anime_action' else 'storyboard'
 
     shot_results: list[dict[str, Any]] = []
     shot_videos: list[Path] = []
     next_input: Path | None = None
     next_start_keyframe: Path | None = None
+
+    def append_child_warnings(payload: dict[str, Any], label: str) -> None:
+        child_warnings = payload.get('warnings') if isinstance(payload.get('warnings'), list) else []
+        for warning in child_warnings:
+            warnings.append(f'{label}: {warning}')
+
+    def keyframe_value(*payloads: dict[str, Any] | None, key: str) -> Any:
+        for payload in payloads:
+            if isinstance(payload, dict) and payload.get(key) is not None:
+                return payload.get(key)
+        return None
+
+    def copy_keyframe(path: Path, shot_index: int, role: str) -> Path:
+        source = require_file(path, {'.png'}, f'shot {shot_index} {role} keyframe')
+        target = keyframe_dir / f'shot_{shot_index:02d}_{role}.png'
+        if source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        if target.stat().st_size <= 0:
+            raise SequenceError(f'copied keyframe is empty: {target}')
+        return target.resolve()
+
+    def existing_keyframe_path(shot_index: int, role: str) -> Path:
+        if existing_keyframe_dir is None:
+            raise SequenceError('existing_keyframe_dir is not set')
+        return require_file(existing_keyframe_dir / f'shot_{shot_index:02d}_{role}.png', {'.png'}, f'existing shot {shot_index} {role} keyframe')
+
+    def build_contact_sheet(image_paths: list[Path]) -> Path | None:
+        if not image_paths or not ffmpeg:
+            return None
+        sheet_inputs = keyframe_dir / 'sheet_inputs'
+        sheet_inputs.mkdir(parents=True, exist_ok=True)
+        for idx, image_path in enumerate(image_paths, start=1):
+            shutil.copy2(image_path, sheet_inputs / f'{idx:03d}.png')
+        rows = max(1, math.ceil(len(image_paths) / 2))
+        output_path = keyframe_dir / 'contact_sheet.jpg'
+        vf = f'scale=416:240:force_original_aspect_ratio=decrease,pad=416:240:(ow-iw)/2:(oh-ih)/2,tile=2x{rows}'
+        cmd = [ffmpeg, '-y', '-framerate', '1', '-i', str(sheet_inputs / '%03d.png'), '-vf', vf, '-frames:v', '1', str(output_path)]
+        proc = run_command(cmd, timeout=120)
+        if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size <= 0:
+            warnings.append(f'contact sheet generation failed: {proc.stderr[-800:]}')
+            return None
+        return output_path.resolve()
 
     def write_partial_manifest(errors: list[str]) -> Path:
         partial_path = work_dir / 'partial_manifest.json'
@@ -775,11 +994,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             'frames_per_shot': frames_per_shot,
             'wan_steps_per_shot': wan_steps_per_shot,
             'motion_profile': motion_profile,
+            'storyboard_mode_requested': requested_storyboard_mode,
+            'storyboard_mode': storyboard_mode,
+            'selected_shot_titles': selected_shot_titles,
+            'action_keywords_detected': action_keywords_detected,
+            'action_core_selected': action_core_selected,
+            'keyframe_quality_preset': keyframe_quality_preset,
+            'keyframe_engine_requested': keyframe_engine,
+            'keyframe_frame_mode': keyframe_frame_mode or None,
+            'shot_prompt_strength': shot_prompt_strength,
+            'composition_profile': requested_composition_profile,
+            'character_consistency_note': character_consistency_note,
             'source_fps': BASE_SOURCE_FPS,
             'target_fps': target_fps if 'target_fps' in locals() else None,
             'requested_control_mode': requested_control_mode,
             'control_mode': effective_control_mode,
             'work_dir': str(work_dir),
+            'keyframe_dir': str(keyframe_dir),
+            'existing_keyframe_dir': str(existing_keyframe_dir) if existing_keyframe_dir else None,
             'storyboard': storyboard,
             'shots': shot_results,
             'shot_videos': [str(path) for path in shot_videos],
@@ -797,15 +1029,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             shot_seed = seed + shot_index - 1
             start_keyframe: Path | None = None
             end_keyframe: Path | None = None
+            start_payload: dict[str, Any] | None = None
+            end_payload: dict[str, Any] | None = None
+            shot_payload: dict[str, Any] | None = None
             tail_frame = frame_dir / f'shot_{shot_index:02d}_tail.png'
 
             if effective_control_mode == 'flf2v':
-                if next_start_keyframe is None:
+                if existing_keyframe_dir is not None:
+                    eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: using existing keyframes')
+                    start_keyframe = copy_keyframe(existing_keyframe_path(shot_index, 'start'), shot_index, 'start')
+                    end_keyframe = copy_keyframe(existing_keyframe_path(shot_index, 'end'), shot_index, 'end')
+                elif next_start_keyframe is None:
                     eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: start keyframe')
                     try:
-                        start_payload = run_single_shot(shot['start_prompt'], mode, shot_seed * 10 + 1, None, None, style_preset, 'i2v_last_frame', shot_prompt_type, True, frames_per_shot, wan_steps_per_shot, args.per_shot_timeout_seconds)
+                        start_payload = run_single_shot(shot['start_prompt'], mode, shot_seed * 10 + 1, None, None, style_preset, 'i2v_last_frame', shot_prompt_type, True, frames_per_shot, wan_steps_per_shot, keyframe_quality_preset, shot.get('composition_profile', requested_composition_profile), shot_prompt_strength, character_consistency_note, keyframe_engine, keyframe_frame_mode, args.per_shot_timeout_seconds)
+                        append_child_warnings(start_payload, f'shot {shot_index} start keyframe')
                         start_keyframe = Path(start_payload['image_path']).resolve()
                     except SequenceError as exc:
+                        if args.keyframe_only_sequence:
+                            raise
                         if mode == 'test' and style_preset == 'anime_action' and next_input is not None:
                             warnings.append(f'shot {shot_index} start keyframe failed in test mode; reusing previous tail frame: {exc}')
                             start_keyframe = next_input
@@ -815,20 +1057,65 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     start_keyframe = next_start_keyframe
                     eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: reusing previous end keyframe as start')
 
-                eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: end keyframe')
-                try:
-                    end_payload = run_single_shot(shot['end_prompt'], mode, shot_seed * 10 + 2, None, None, style_preset, 'i2v_last_frame', shot_prompt_type, True, frames_per_shot, wan_steps_per_shot, args.per_shot_timeout_seconds)
-                    end_keyframe = Path(end_payload['image_path']).resolve()
-                except SequenceError as exc:
-                    if mode == 'test' and style_preset == 'anime_action' and start_keyframe is not None:
-                        warnings.append(f'shot {shot_index} end keyframe failed in test mode; reusing start keyframe for plumbing: {exc}')
-                        end_keyframe = start_keyframe
-                    else:
-                        raise
+                if existing_keyframe_dir is None:
+                    eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: end keyframe')
+                    try:
+                        end_payload = run_single_shot(shot['end_prompt'], mode, shot_seed * 10 + 2, None, None, style_preset, 'i2v_last_frame', shot_prompt_type, True, frames_per_shot, wan_steps_per_shot, keyframe_quality_preset, shot.get('composition_profile', requested_composition_profile), shot_prompt_strength, character_consistency_note, keyframe_engine, keyframe_frame_mode, args.per_shot_timeout_seconds)
+                        append_child_warnings(end_payload, f'shot {shot_index} end keyframe')
+                        end_keyframe = Path(end_payload['image_path']).resolve()
+                    except SequenceError as exc:
+                        if args.keyframe_only_sequence:
+                            raise
+                        if mode == 'test' and style_preset == 'anime_action' and start_keyframe is not None:
+                            warnings.append(f'shot {shot_index} end keyframe failed in test mode; reusing start keyframe for plumbing: {exc}')
+                            end_keyframe = start_keyframe
+                        else:
+                            raise
+
+                if args.keyframe_only_sequence:
+                    copied_start = copy_keyframe(start_keyframe, shot_index, 'start')
+                    copied_end = copy_keyframe(end_keyframe, shot_index, 'end')
+                    next_start_keyframe = end_keyframe
+                    shot_results.append({
+                        'index': shot_index,
+                        'title': shot['title'],
+                        'composition_profile': shot.get('composition_profile'),
+                        'prompt': shot['prompt'],
+                        'start_prompt': shot['start_prompt'],
+                        'end_prompt': shot['end_prompt'],
+                        'video_prompt': shot['video_prompt'],
+                        'start_keyframe_prompt': shot['start_prompt'],
+                        'end_keyframe_prompt': shot['end_prompt'],
+                        'seed': shot_seed,
+                        'control_mode': 'keyframe_only_sequence',
+                        'duration_seconds': effective_shot_duration,
+                        'frames_per_shot': frames_per_shot,
+                        'wan_steps_per_shot': wan_steps_per_shot,
+                        'video_path': None,
+                        'image_path': str(copied_start),
+                        'start_keyframe_path': str(copied_start),
+                        'end_keyframe_path': str(copied_end),
+                        'tail_frame_path': None,
+                        'keyframe_engine': keyframe_value(start_payload, end_payload, key='keyframe_engine'),
+                        'keyframe_frame_mode': keyframe_value(start_payload, end_payload, key='keyframe_frame_mode') or keyframe_frame_mode,
+                        'keyframe_checkpoint': keyframe_value(start_payload, end_payload, key='keyframe_checkpoint'),
+                        'keyframe_workflow': keyframe_value(start_payload, end_payload, key='keyframe_workflow'),
+                        'keyframe_sampler': keyframe_value(start_payload, end_payload, key='keyframe_sampler'),
+                        'keyframe_steps': keyframe_value(start_payload, end_payload, key='keyframe_steps'),
+                        'keyframe_cfg': keyframe_value(start_payload, end_payload, key='keyframe_cfg'),
+                        'keyframe_resolution': keyframe_value(start_payload, end_payload, key='keyframe_resolution'),
+                        'keyframe_prompt': keyframe_value(start_payload, end_payload, key='keyframe_prompt'),
+                        'negative_prompt': keyframe_value(start_payload, end_payload, key='negative_prompt'),
+                        'keyframe_validation': {'start': keyframe_value(start_payload, key='keyframe_validation'), 'end': keyframe_value(end_payload, key='keyframe_validation')},
+                        'comfyui': {'start': start_payload.get('comfyui') if start_payload else None, 'end': end_payload.get('comfyui') if end_payload else None},
+                    })
+                    eprint(f'[shot {shot_index}/{shot_count}] keyframes start={copied_start} end={copied_end}')
+                    continue
 
                 try:
                     eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: video render ({effective_control_mode})')
-                    shot_payload = run_single_shot(shot['video_prompt'], mode, shot_seed, start_keyframe, end_keyframe, style_preset, 'flf2v', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, args.per_shot_timeout_seconds)
+                    shot_payload = run_single_shot(shot['video_prompt'], mode, shot_seed, start_keyframe, end_keyframe, style_preset, 'flf2v', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, keyframe_quality_preset, shot.get('composition_profile', requested_composition_profile), shot_prompt_strength, character_consistency_note, keyframe_engine, keyframe_frame_mode, args.per_shot_timeout_seconds)
+                    append_child_warnings(shot_payload, f'shot {shot_index} video')
                 except SequenceError as exc:
                     if mode == 'test' and style_preset == 'anime_action' and shot_videos:
                         warnings.append(f'shot {shot_index} video render failed in test mode; reusing previous shot video for plumbing: {exc}')
@@ -847,14 +1134,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                             raise
                         warnings.append(f'FLF2V failed on shot {shot_index}; falling back to i2v_last_frame: {exc}')
                         effective_control_mode = 'i2v_last_frame'
-                        shot_payload = run_single_shot(shot['video_prompt'], mode, shot_seed, start_keyframe, None, style_preset, 'i2v_last_frame', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, args.per_shot_timeout_seconds)
+                        shot_payload = run_single_shot(shot['video_prompt'], mode, shot_seed, start_keyframe, None, style_preset, 'i2v_last_frame', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, keyframe_quality_preset, shot.get('composition_profile', requested_composition_profile), shot_prompt_strength, character_consistency_note, keyframe_engine, keyframe_frame_mode, args.per_shot_timeout_seconds)
+                        append_child_warnings(shot_payload, f'shot {shot_index} fallback video')
                         end_keyframe = None
                 next_start_keyframe = end_keyframe if effective_control_mode == 'flf2v' else None
             else:
                 input_image = next_input if args.continuity == 'last_frame' else None
                 eprint(f'[shot {shot_index}/{shot_count}] {shot["title"]}: video render ({effective_control_mode})')
                 try:
-                    shot_payload = run_single_shot(shot['prompt'], mode, shot_seed, input_image, None, style_preset, 'i2v_last_frame', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, args.per_shot_timeout_seconds)
+                    shot_payload = run_single_shot(shot['prompt'], mode, shot_seed, input_image, None, style_preset, 'i2v_last_frame', shot_prompt_type, False, frames_per_shot, wan_steps_per_shot, keyframe_quality_preset, shot.get('composition_profile', requested_composition_profile), shot_prompt_strength, character_consistency_note, keyframe_engine, keyframe_frame_mode, args.per_shot_timeout_seconds)
+                    append_child_warnings(shot_payload, f'shot {shot_index} i2v video')
                 except SequenceError as exc:
                     if mode == 'test' and style_preset == 'anime_action' and shot_videos:
                         warnings.append(f'shot {shot_index} i2v render failed in test mode; reusing previous shot video for plumbing: {exc}')
@@ -871,6 +1160,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             shot_results.append({
                 'index': shot_index,
                 'title': shot['title'],
+                'composition_profile': shot.get('composition_profile'),
                 'prompt': shot['prompt'],
                 'start_prompt': shot['start_prompt'],
                 'end_prompt': shot['end_prompt'],
@@ -887,8 +1177,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 'start_keyframe_path': str(start_keyframe) if start_keyframe else shot_payload.get('start_keyframe_path'),
                 'end_keyframe_path': str(end_keyframe) if end_keyframe else shot_payload.get('end_keyframe_path'),
                 'tail_frame_path': str(tail_frame.resolve()) if tail_frame.exists() else None,
+                'keyframe_engine': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_engine'),
+                'keyframe_frame_mode': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_frame_mode') or keyframe_frame_mode,
+                'keyframe_checkpoint': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_checkpoint'),
+                'keyframe_workflow': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_workflow'),
+                'keyframe_sampler': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_sampler'),
+                'keyframe_steps': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_steps'),
+                'keyframe_cfg': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_cfg'),
+                'keyframe_resolution': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_resolution'),
                 'keyframe_prompt': shot_payload.get('keyframe_prompt'),
                 'negative_prompt': shot_payload.get('negative_prompt'),
+                'keyframe_validation': keyframe_value(start_payload, end_payload, shot_payload, key='keyframe_validation'),
                 'comfyui': shot_payload.get('comfyui'),
             })
 
@@ -896,10 +1195,92 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         partial_path = write_partial_manifest([str(exc)])
         raise SequenceError(f'{exc}; partial_manifest_path={partial_path}') from exc
 
+    if args.keyframe_only_sequence:
+        keyframe_paths = []
+        for shot in shot_results:
+            for key in ('start_keyframe_path', 'end_keyframe_path'):
+                raw = shot.get(key)
+                if raw:
+                    keyframe_paths.append(Path(raw))
+        contact_sheet = build_contact_sheet(keyframe_paths)
+        first_shot = shot_results[0] if shot_results else {}
+        runtime_seconds = round(time.time() - started_at, 3)
+        manifest = {
+            'status': 'completed',
+            'prompt': args.prompt,
+            'style': args.style,
+            'style_preset': style_preset,
+            'shot_prompt_type': shot_prompt_type,
+            'keyframe_prompt': storyboard[0]['start_prompt'] if storyboard else None,
+            'video_prompt': None,
+            'negative_prompt': first_shot.get('negative_prompt'),
+            'mode': mode,
+            'duration_seconds_requested': duration,
+            'duration_seconds_planned_source': planned_source_duration,
+            'duration_seconds_actual': None,
+            'duration_delta_seconds': duration_delta,
+            'shot_count': shot_count,
+            'shot_duration_seconds': effective_shot_duration,
+            'shot_duration_seconds_requested': requested_shot_duration or None,
+            'frames_per_shot': frames_per_shot,
+            'wan_steps_per_shot': wan_steps_per_shot,
+            'motion_profile': motion_profile,
+            'storyboard_mode_requested': requested_storyboard_mode,
+            'storyboard_mode': storyboard_mode,
+            'selected_shot_titles': selected_shot_titles,
+            'action_keywords_detected': action_keywords_detected,
+            'action_core_selected': action_core_selected,
+            'keyframe_quality_preset': keyframe_quality_preset,
+            'keyframe_engine_requested': keyframe_engine,
+            'keyframe_engine': first_shot.get('keyframe_engine'),
+            'keyframe_frame_mode': first_shot.get('keyframe_frame_mode') or keyframe_frame_mode or None,
+            'keyframe_checkpoint': first_shot.get('keyframe_checkpoint'),
+            'keyframe_workflow': first_shot.get('keyframe_workflow'),
+            'keyframe_sampler': first_shot.get('keyframe_sampler'),
+            'keyframe_steps': first_shot.get('keyframe_steps'),
+            'keyframe_cfg': first_shot.get('keyframe_cfg'),
+            'keyframe_resolution': first_shot.get('keyframe_resolution'),
+            'shot_prompt_strength': shot_prompt_strength,
+            'composition_profile': requested_composition_profile,
+            'character_consistency_note': character_consistency_note,
+            'runtime_seconds': runtime_seconds,
+            'continuity': args.continuity,
+            'requested_control_mode': requested_control_mode,
+            'control_mode': 'keyframe_only_sequence',
+            'postprocess_requested': args.postprocess,
+            'postprocess_mode': 'none',
+            'effective_postprocess_mode': 'none',
+            'interpolation_model_name': None,
+            'source_fps': BASE_SOURCE_FPS,
+            'target_fps': target_fps,
+            'actual_fps': None,
+            'actual_frame_count': None,
+            'stitched_video_path': None,
+            'postprocessed_video_path': None,
+            'seed': seed,
+            'video_path': None,
+            'media': None,
+            'work_dir': str(work_dir),
+            'keyframe_dir': str(keyframe_dir),
+            'existing_keyframe_dir': str(existing_keyframe_dir) if existing_keyframe_dir else None,
+            'keyframe_paths': [str(path) for path in keyframe_paths],
+            'keyframe_contact_sheet_path': str(contact_sheet) if contact_sheet else None,
+            'storyboard': storyboard,
+            'shots': shot_results,
+            'warnings': warnings,
+            'errors': [],
+        }
+        manifest_path = work_dir / 'manifest.json'
+        manifest['manifest_path'] = str(manifest_path)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+        eprint(f'[sequence] keyframe-only manifest={manifest_path}')
+        if contact_sheet:
+            eprint(f'[sequence] keyframe contact sheet={contact_sheet}')
+        return manifest
+
     eprint(f'[sequence] stitching {len(shot_videos)} shot videos')
     stitched_path = DEFAULT_VIDEO_DIR / f'{slug}-sequence-{run_id}.mp4'
     stitched_video = concat_videos(shot_videos, stitched_path, work_dir, ffmpeg)
-    target_fps = max(8, min(24, int(args.target_fps)))
     final_video = stitched_video
     postprocessed_video_path = None
     requested_postprocess_mode = args.postprocess
@@ -936,6 +1317,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         'frames_per_shot': frames_per_shot,
         'wan_steps_per_shot': wan_steps_per_shot,
         'motion_profile': motion_profile,
+        'storyboard_mode_requested': requested_storyboard_mode,
+        'storyboard_mode': storyboard_mode,
+        'selected_shot_titles': selected_shot_titles,
+        'action_keywords_detected': action_keywords_detected,
+        'action_core_selected': action_core_selected,
+        'keyframe_quality_preset': keyframe_quality_preset,
+        'keyframe_engine_requested': keyframe_engine,
+        'keyframe_engine': shot_results[0].get('keyframe_engine') if shot_results else None,
+        'keyframe_frame_mode': shot_results[0].get('keyframe_frame_mode') if shot_results else (keyframe_frame_mode or None),
+        'keyframe_checkpoint': shot_results[0].get('keyframe_checkpoint') if shot_results else None,
+        'keyframe_workflow': shot_results[0].get('keyframe_workflow') if shot_results else None,
+        'keyframe_sampler': shot_results[0].get('keyframe_sampler') if shot_results else None,
+        'keyframe_steps': shot_results[0].get('keyframe_steps') if shot_results else None,
+        'keyframe_cfg': shot_results[0].get('keyframe_cfg') if shot_results else None,
+        'keyframe_resolution': shot_results[0].get('keyframe_resolution') if shot_results else None,
+        'shot_prompt_strength': shot_prompt_strength,
+        'composition_profile': requested_composition_profile,
+        'character_consistency_note': character_consistency_note,
         'runtime_seconds': runtime_seconds,
         'continuity': args.continuity,
         'requested_control_mode': requested_control_mode,
@@ -954,6 +1353,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         'video_path': str(final_video),
         'media': f'MEDIA:{final_video}',
         'work_dir': str(work_dir),
+        'keyframe_dir': str(keyframe_dir),
+        'existing_keyframe_dir': str(existing_keyframe_dir) if existing_keyframe_dir else None,
         'storyboard': storyboard,
         'shots': shot_results,
         'warnings': warnings,
@@ -976,6 +1377,15 @@ def main() -> int:
     parser.add_argument('--frames-per-shot', type=int, default=0)
     parser.add_argument('--wan-steps-per-shot', type=int, default=0)
     parser.add_argument('--motion-profile', choices=['rapid', 'balanced', 'dramatic', 'impact'], default='balanced')
+    parser.add_argument('--storyboard-mode', choices=['auto', 'intro_action', 'action_core', 'full_arc'], default='auto')
+    parser.add_argument('--keyframe-quality-preset', choices=['flux_default', 'anime_action_v2'], default='flux_default')
+    parser.add_argument('--keyframe-engine', choices=['auto', 'flux', 'animagine'], default='auto')
+    parser.add_argument('--keyframe-frame-mode', choices=['single_scene', 'stylized_panel'], default='')
+    parser.add_argument('--keyframe-only-sequence', action='store_true')
+    parser.add_argument('--existing-keyframe-dir', default='', help='Optional directory containing approved shot_XX_start.png and shot_XX_end.png keyframes. Skips keyframe generation and renders Wan from these images.')
+    parser.add_argument('--shot-prompt-strength', choices=['light', 'balanced', 'strong'], default='balanced')
+    parser.add_argument('--composition-profile', choices=['auto', 'establishing', 'closeup', 'action', 'impact'], default='auto')
+    parser.add_argument('--character-consistency-note', default='')
     parser.add_argument('--mode', choices=['test', 'quality'], default='quality')
     parser.add_argument('--style', default='original_japanese_anime_action')
     parser.add_argument('--style-preset', choices=['default', 'anime_action'], default='anime_action')

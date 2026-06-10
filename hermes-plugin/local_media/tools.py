@@ -90,6 +90,55 @@ GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
                 "default": "balanced",
                 "description": "Anime action shot timing preset. balanced is the safe default; rapid cuts faster, dramatic holds longer, impact favors stronger action beats.",
             },
+            "storyboard_mode": {
+                "type": "string",
+                "enum": ["auto", "intro_action", "action_core", "full_arc"],
+                "default": "auto",
+                "description": "Anime action storyboard selection. auto detects fight keywords and uses action_core for short sword-fight clips so blade clash and counter beats are included.",
+            },
+            "keyframe_quality_preset": {
+                "type": "string",
+                "enum": ["flux_default", "anime_action_v2"],
+                "default": "flux_default",
+                "description": "Optional Phase 3 keyframe prompt preset. anime_action_v2 adds shot-specific composition, pose readability, and character consistency language.",
+            },
+            "keyframe_engine": {
+                "type": "string",
+                "enum": ["auto", "flux", "animagine"],
+                "default": "auto",
+                "description": "Keyframe renderer. auto uses Animagine for anime_action only when the checkpoint is available; animagine requires animagine-xl-3.1.safetensors.",
+            },
+            "keyframe_frame_mode": {
+                "type": "string",
+                "enum": ["single_scene", "stylized_panel"],
+                "description": "Animagine keyframe composition mode. single_scene forces one full-frame anime film still with no panels or collage; stylized_panel preserves the older stylized behavior. Defaults to single_scene for anime_action with explicit animagine.",
+            },
+            "keyframe_only_sequence": {
+                "type": "boolean",
+                "default": False,
+                "description": "Generate start/end keyframes for every storyboard shot and stop before Wan video rendering.",
+            },
+            "existing_keyframe_dir": {
+                "type": "string",
+                "description": "Optional approved keyframe directory containing shot_XX_start.png and shot_XX_end.png. When set, skip keyframe generation/validation and render Wan from these existing images.",
+            },
+            "shot_prompt_strength": {
+                "type": "string",
+                "enum": ["light", "balanced", "strong"],
+                "default": "balanced",
+                "description": "Controls how strongly anime_action_v2 emphasizes readable poses, clear silhouettes, and restrained effects.",
+            },
+            "composition_profile": {
+                "type": "string",
+                "enum": ["auto", "establishing", "closeup", "action", "impact"],
+                "default": "auto",
+                "description": "Optional keyframe composition hint. auto selects a profile per storyboard beat.",
+            },
+            "character_consistency_note": {
+                "type": "string",
+                "default": "",
+                "description": "Optional original character continuity note for repeated clothing, colors, weapons, and faces across shots.",
+            },
             "style": {
                 "type": "string",
                 "default": "original_japanese_anime_action",
@@ -125,6 +174,12 @@ GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
                 "enum": ["last_frame", "independent"],
                 "default": "last_frame",
                 "description": "last_frame chains each shot into the next; independent renders standalone shots then stitches them.",
+            },
+            "seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional deterministic sequence seed. Use this to reproduce a previously approved keyframe contact sheet.",
             },
             "timeout_seconds": {
                 "type": "integer",
@@ -176,6 +231,17 @@ GENERATE_VIDEO_SCHEMA: dict[str, Any] = {
                 "enum": ["default", "anime_action"],
                 "default": "default",
                 "description": "Use anime_action for original 2D cel-shaded anime action; default preserves the older prompt style.",
+            },
+            "keyframe_engine": {
+                "type": "string",
+                "enum": ["auto", "flux", "animagine"],
+                "default": "auto",
+                "description": "Keyframe renderer for generated keyframes. animagine requires animagine-xl-3.1.safetensors.",
+            },
+            "keyframe_frame_mode": {
+                "type": "string",
+                "enum": ["single_scene", "stylized_panel"],
+                "description": "Animagine keyframe composition mode. single_scene forces one full-frame anime film still with no panels or collage; stylized_panel preserves the older stylized behavior. Defaults to single_scene for anime_action with explicit animagine.",
             },
             "input_image_path": {
                 "type": "string",
@@ -264,12 +330,16 @@ def handle_generate_video(args: dict[str, Any], **kw) -> str:
 
     mode = _coerce_mode(args.get("mode"))
     style_preset = _coerce_style_preset(args.get("style_preset") or "default")
+    keyframe_engine = _coerce_keyframe_engine(args.get("keyframe_engine"))
+    keyframe_frame_mode = _coerce_keyframe_frame_mode(args.get("keyframe_frame_mode"), style_preset, keyframe_engine)
     timeout = _coerce_timeout(args.get("timeout_seconds"))
     input_image = str(args.get("input_image_path") or "").strip()
     if not input_image and bool(args.get("use_smoke_image")):
         input_image = str(SMOKE_IMAGE)
 
-    cmd = [sys.executable, str(PIPELINE_SCRIPT), "--prompt", prompt, "--mode", mode, "--style-preset", style_preset]
+    cmd = [sys.executable, str(PIPELINE_SCRIPT), "--prompt", prompt, "--mode", mode, "--style-preset", style_preset, "--keyframe-engine", keyframe_engine]
+    if keyframe_frame_mode:
+        cmd.extend(["--keyframe-frame-mode", keyframe_frame_mode])
     if DEFAULT_ENV_FILE.exists():
         cmd.extend(["--env-file", str(DEFAULT_ENV_FILE)])
     if input_image:
@@ -301,6 +371,14 @@ def handle_generate_video(args: dict[str, Any], **kw) -> str:
             "image_path": image_path,
             "mode": mode,
             "style_preset": payload.get("style_preset"),
+            "keyframe_engine": payload.get("keyframe_engine"),
+            "keyframe_frame_mode": payload.get("keyframe_frame_mode"),
+            "keyframe_checkpoint": payload.get("keyframe_checkpoint"),
+            "keyframe_workflow": payload.get("keyframe_workflow"),
+            "keyframe_sampler": payload.get("keyframe_sampler"),
+            "keyframe_steps": payload.get("keyframe_steps"),
+            "keyframe_cfg": payload.get("keyframe_cfg"),
+            "keyframe_resolution": payload.get("keyframe_resolution"),
             "prompt_used": payload.get("prompt_used"),
             "comfyui": payload.get("comfyui"),
             "note": "Send the media field verbatim to deliver the video on Telegram.",
@@ -368,6 +446,16 @@ def _coerce_optional_int(value: Any, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
+def _coerce_optional_seed(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except Exception:
+        return None
+    if number < 0 or number > 2_147_483_647:
+        return None
+    return number
+
+
 def _coerce_optional_float(value: Any, low: float, high: float) -> float:
     try:
         number = float(value)
@@ -379,6 +467,40 @@ def _coerce_optional_float(value: Any, low: float, high: float) -> float:
 def _coerce_motion_profile(value: Any) -> str:
     profile = str(value or "balanced").strip().lower()
     return profile if profile in {"rapid", "balanced", "dramatic", "impact"} else "balanced"
+
+
+def _coerce_storyboard_mode(value: Any) -> str:
+    mode = str(value or "auto").strip().lower()
+    return mode if mode in {"auto", "intro_action", "action_core", "full_arc"} else "auto"
+
+
+def _coerce_keyframe_quality_preset(value: Any) -> str:
+    preset = str(value or "flux_default").strip().lower()
+    return preset if preset in {"flux_default", "anime_action_v2"} else "flux_default"
+
+
+def _coerce_keyframe_engine(value: Any) -> str:
+    engine = str(value or "auto").strip().lower()
+    return engine if engine in {"auto", "flux", "animagine"} else "auto"
+
+
+def _coerce_keyframe_frame_mode(value: Any, style_preset: str, keyframe_engine: str) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in {"single_scene", "stylized_panel"}:
+        return mode
+    if style_preset == "anime_action" and keyframe_engine == "animagine":
+        return "single_scene"
+    return ""
+
+
+def _coerce_shot_prompt_strength(value: Any) -> str:
+    strength = str(value or "balanced").strip().lower()
+    return strength if strength in {"light", "balanced", "strong"} else "balanced"
+
+
+def _coerce_composition_profile(value: Any) -> str:
+    profile = str(value or "auto").strip().lower()
+    return profile if profile in {"auto", "establishing", "closeup", "action", "impact"} else "auto"
 
 
 def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
@@ -402,6 +524,16 @@ def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
     frames_per_shot = _coerce_optional_int(args.get("frames_per_shot"), 0, 33)
     wan_steps_per_shot = _coerce_optional_int(args.get("wan_steps_per_shot"), 0, 30)
     motion_profile = _coerce_motion_profile(args.get("motion_profile"))
+    storyboard_mode = _coerce_storyboard_mode(args.get("storyboard_mode"))
+    keyframe_quality_preset = _coerce_keyframe_quality_preset(args.get("keyframe_quality_preset"))
+    keyframe_engine = _coerce_keyframe_engine(args.get("keyframe_engine"))
+    keyframe_frame_mode = _coerce_keyframe_frame_mode(args.get("keyframe_frame_mode"), style_preset, keyframe_engine)
+    keyframe_only_sequence = bool(args.get("keyframe_only_sequence"))
+    existing_keyframe_dir = str(args.get("existing_keyframe_dir") or "").strip()
+    shot_prompt_strength = _coerce_shot_prompt_strength(args.get("shot_prompt_strength"))
+    composition_profile = _coerce_composition_profile(args.get("composition_profile"))
+    character_consistency_note = str(args.get("character_consistency_note") or "").strip()
+    seed = _coerce_optional_seed(args.get("seed"))
 
     cmd = [
         sys.executable,
@@ -426,7 +558,25 @@ def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
         str(target_fps),
         "--motion-profile",
         motion_profile,
+        "--storyboard-mode",
+        storyboard_mode,
+        "--keyframe-quality-preset",
+        keyframe_quality_preset,
+        "--keyframe-engine",
+        keyframe_engine,
+        "--shot-prompt-strength",
+        shot_prompt_strength,
+        "--composition-profile",
+        composition_profile,
     ]
+    if keyframe_frame_mode:
+        cmd.extend(["--keyframe-frame-mode", keyframe_frame_mode])
+    if keyframe_only_sequence:
+        cmd.append("--keyframe-only-sequence")
+    if existing_keyframe_dir:
+        cmd.extend(["--existing-keyframe-dir", existing_keyframe_dir])
+    if character_consistency_note:
+        cmd.extend(["--character-consistency-note", character_consistency_note])
     if shot_count > 0:
         cmd.extend(["--shot-count", str(shot_count)])
     if shot_duration_seconds > 0:
@@ -435,6 +585,8 @@ def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
         cmd.extend(["--frames-per-shot", str(frames_per_shot)])
     if wan_steps_per_shot > 0:
         cmd.extend(["--wan-steps-per-shot", str(wan_steps_per_shot)])
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
 
     try:
         proc = subprocess.run(
@@ -450,8 +602,37 @@ def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
             errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
             detail = "; ".join(str(item) for item in errors) or proc.stderr[-1600:] or proc.stdout[-1600:]
             return tool_error(f"generate_video_sequence failed: {detail}")
-        video_path, size = _verify_video_path(payload.get("video_path"))
         manifest_path = payload.get("manifest_path")
+        if keyframe_only_sequence:
+            result = {
+                "success": True,
+                "status": "completed",
+                "video_path": None,
+                "media": None,
+                "send_to_user": None,
+                "manifest_path": manifest_path,
+                "keyframe_dir": payload.get("keyframe_dir"),
+                "existing_keyframe_dir": payload.get("existing_keyframe_dir"),
+                "keyframe_paths": payload.get("keyframe_paths"),
+                "keyframe_contact_sheet_path": payload.get("keyframe_contact_sheet_path"),
+                "duration_seconds": payload.get("duration_seconds_requested"),
+                "shot_count": payload.get("shot_count"),
+                "selected_shot_titles": payload.get("selected_shot_titles"),
+                "storyboard_mode": payload.get("storyboard_mode"),
+                "keyframe_quality_preset": payload.get("keyframe_quality_preset"),
+                "keyframe_engine": payload.get("keyframe_engine"),
+                "keyframe_frame_mode": payload.get("keyframe_frame_mode"),
+                "keyframe_checkpoint": payload.get("keyframe_checkpoint"),
+                "keyframe_workflow": payload.get("keyframe_workflow"),
+                "keyframe_sampler": payload.get("keyframe_sampler"),
+                "keyframe_steps": payload.get("keyframe_steps"),
+                "keyframe_cfg": payload.get("keyframe_cfg"),
+                "keyframe_resolution": payload.get("keyframe_resolution"),
+                "warnings": payload.get("warnings"),
+                "note": "Review the keyframe paths or contact sheet before running the full Wan render.",
+            }
+            return tool_result(result)
+        video_path, size = _verify_video_path(payload.get("video_path"))
         result = {
             "success": True,
             "status": "completed",
@@ -468,6 +649,25 @@ def handle_generate_video_sequence(args: dict[str, Any], **kw) -> str:
             "frames_per_shot": payload.get("frames_per_shot"),
             "wan_steps_per_shot": payload.get("wan_steps_per_shot"),
             "motion_profile": payload.get("motion_profile"),
+            "storyboard_mode_requested": payload.get("storyboard_mode_requested"),
+            "storyboard_mode": payload.get("storyboard_mode"),
+            "selected_shot_titles": payload.get("selected_shot_titles"),
+            "action_keywords_detected": payload.get("action_keywords_detected"),
+            "action_core_selected": payload.get("action_core_selected"),
+            "keyframe_quality_preset": payload.get("keyframe_quality_preset"),
+            "keyframe_engine": payload.get("keyframe_engine"),
+            "keyframe_frame_mode": payload.get("keyframe_frame_mode"),
+            "keyframe_checkpoint": payload.get("keyframe_checkpoint"),
+            "keyframe_workflow": payload.get("keyframe_workflow"),
+            "keyframe_sampler": payload.get("keyframe_sampler"),
+            "keyframe_steps": payload.get("keyframe_steps"),
+            "keyframe_cfg": payload.get("keyframe_cfg"),
+            "keyframe_resolution": payload.get("keyframe_resolution"),
+            "keyframe_dir": payload.get("keyframe_dir"),
+            "existing_keyframe_dir": payload.get("existing_keyframe_dir"),
+            "shot_prompt_strength": payload.get("shot_prompt_strength"),
+            "composition_profile": payload.get("composition_profile"),
+            "character_consistency_note": payload.get("character_consistency_note"),
             "runtime_seconds": payload.get("runtime_seconds"),
             "continuity": payload.get("continuity"),
             "mode": payload.get("mode"),
