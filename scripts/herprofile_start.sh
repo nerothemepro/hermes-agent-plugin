@@ -7,7 +7,7 @@ if [[ -z "$PROFILE" ]]; then
   exit 2
 fi
 
-HERMES_HOME="${HERMES_HOME:-/opt/data/hermes-profiles/$PROFILE}"
+HERMES_HOME="${HERPROFILE_HOME:-/opt/data/hermes-profiles/$PROFILE}"
 HERMES_BIN="${HERMES_BIN:-/workspace/.venvs/hermes-agent/bin/hermes}"
 HERMES_SRC="${HERMES_SRC:-/workspace/hermes-agent}"
 LOG_DIR="$HERMES_HOME/logs"

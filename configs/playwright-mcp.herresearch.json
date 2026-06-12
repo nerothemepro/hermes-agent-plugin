@@ -1,0 +1,21 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "userDataDir": "/opt/data/hermes-profiles/herresearch/playwright-user-data",
+    "launchOptions": {
+      "headless": true,
+      "chromiumSandbox": false,
+      "args": [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage"
+      ]
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    }
+  }
+}
