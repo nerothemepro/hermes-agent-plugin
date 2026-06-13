@@ -18,6 +18,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 /opt/data/hermes-profiles/hervid
 /opt/data/hermes-profiles/herresearch
 /opt/data/hermes-profiles/herdev
+/opt/data/hermes-profiles/hertran
 ```
 
 ## Profile Roles
@@ -27,6 +28,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 | `hervid` | Generate marketing/social videos through ComfyUI + Wan2.1 | `google/gemma-4-12b-qat` | `clarify`, `messaging`, `local_media` |
 | `herresearch` | Research, synthesize reports, cron/news briefing | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `web`, `cronjob`, `memory` |
 | `herdev` | Coding/dev work with SDTK and local repos | `qwen/qwen3.6-27b` | `clarify`, `messaging`, `terminal`, `file`, `search` |
+| `hertran` | Translation and PM communication drafting for Japanese/English/Vietnamese email, Slack, and Teams messages | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `memory` |
 
 ## External Services
 
@@ -50,6 +52,7 @@ Recommended minimums:
 hervid / google/gemma-4-12b-qat:        16384 context
 herresearch / google/gemma-4-26b-a4b-qat: 32768 context recommended
 herdev / qwen/qwen3.6-27b:              32768 context recommended
+hertran / google/gemma-4-26b-a4b-qat:   32768 context recommended
 ```
 
 Known HerResearch failure pattern:
@@ -71,6 +74,7 @@ Start all profiles:
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh hervid"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh herresearch"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh herdev"
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh hertran"
 ```
 
 Stop all profiles:
@@ -79,6 +83,7 @@ Stop all profiles:
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh hervid"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh herresearch"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh herdev"
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh hertran"
 ```
 
 Restart one profile:
