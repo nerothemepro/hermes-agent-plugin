@@ -78,7 +78,7 @@ const result = await checkAvailability({
     {
       "date": "YYYY-MM-DD",
       "raw": "○|△|×|休日|...",
-      "meaning": "available|limited|unavailable|holiday|unknown"
+      "meaning": "available|limited|unavailable|closed_or_non_bookable|unknown"
     }
   ],
   "free_site_rule": "フリーサイトをご希望の場合は設備項目（区画サイト等）を選択せずにご予約ください。",
@@ -98,8 +98,22 @@ const result = await checkAvailability({
 | ○ | `available` | Sites available |
 | △ | `limited` | Limited availability |
 | × | `unavailable` | No availability |
-| 休日 | `holiday` | Japanese national holiday |
+| 休日 | `closed_or_non_bookable` | Date is marked as a day off on the
+  reservation calendar — not bookable / no availability displayed.
+  **Do NOT interpret this as a Japanese national holiday.** |
 | *(empty)* | `unknown` | No data for this date |
+
+## Agent Usage Notes
+
+When summarizing tool output, **only report what the JSON proves**:
+
+- If checkout date is `closed_or_non_bookable`, **do not** conclude the stay is
+  bookable. Say the booking needs **manual confirmation** on the Oarai site.
+- `休日` on the reservation calendar means the camp's booking system does not
+  display availability for that date. It does **not** imply a national holiday,
+  and it does **not** guarantee the camp is open or closed.
+- A checkin date of `available` (○) does not guarantee a full stay is bookable
+  if the checkout date is `closed_or_non_bookable`.
 
 ## Strategy
 

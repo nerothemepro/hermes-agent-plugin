@@ -125,7 +125,7 @@ function parseCalendar(html, year, month) {
       const holidayMatch = ddContent.match(/<span[^>]*>休日<\/span>/i);
       if (holidayMatch) {
         raw = '休日';
-        meaning = 'holiday';
+        meaning = 'closed_or_non_bookable';
       } else {
         // Check for ○ △ × in text content
         if (/\u25CB/.test(ddContent)) {

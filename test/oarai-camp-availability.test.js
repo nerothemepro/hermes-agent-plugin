@@ -34,12 +34,12 @@ describe('parseCalendar — offline fixture', () => {
     assert.equal(entry.meaning, 'available');
   });
 
-  it('2026-06-28 should be 休日 (holiday)', () => {
+  it('2026-06-28 should be 休日 (closed_or_non_bookable)', () => {
     const entries = parseCalendar(fixtureHtml, 2026, 6);
     const entry = entries.find((e) => e.date === '2026-06-28');
     assert.ok(entry, '2026-06-28 should exist');
     assert.equal(entry.raw, '休日');
-    assert.equal(entry.meaning, 'holiday');
+    assert.equal(entry.meaning, 'closed_or_non_bookable');
   });
 
   it('2026-06-13 should be △ (limited)', () => {
@@ -75,7 +75,7 @@ describe('checkAvailability — offline fixture', () => {
 
     const co = result.availability.find((a) => a.date === '2026-06-28');
     assert.ok(co, 'checkout date should be in availability');
-    assert.equal(co.meaning, 'holiday');
+    assert.equal(co.meaning, 'closed_or_non_bookable');
   });
 
   it('should handle invalid date format', async () => {
