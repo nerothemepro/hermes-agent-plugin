@@ -20,7 +20,7 @@ model:
   default: google/gemma-4-26b-a4b-qat
   provider: lmstudio
   base_url: http://host.docker.internal:1234/v1
-  context_length: 32768
+  context_length: 65536
 ```
 
 `google/gemma-4-26b-a4b-qat` is shared with HerResearch. This is allowed because each Hermes profile has independent `HERMES_HOME`, sessions, memory, logs, and Telegram bot token. The only shared resource is LM Studio/GPU inference capacity, so simultaneous use may increase latency or queue requests.

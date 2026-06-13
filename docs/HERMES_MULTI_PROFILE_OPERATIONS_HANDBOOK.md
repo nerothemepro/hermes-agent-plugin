@@ -52,7 +52,7 @@ Recommended minimums:
 hervid / google/gemma-4-12b-qat:        16384 context
 herresearch / google/gemma-4-26b-a4b-qat: 32768 context recommended
 herdev / qwen/qwen3.6-27b:              32768 context recommended
-hertran / google/gemma-4-26b-a4b-qat:   32768 context recommended
+hertran / google/gemma-4-26b-a4b-qat:   65536 context required
 ```
 
 Known HerResearch failure pattern:
