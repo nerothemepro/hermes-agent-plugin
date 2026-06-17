@@ -38,7 +38,44 @@ Profile list defaults to `hervid herresearch herdev hertran`; override with the
 (`hermes-workspace`, `hermes-data`). Recreating the container does **not** lose
 the repo, the venv, the profiles, or model config — they live in the volumes.
 
-## Option A (recommended) — bake the boot script into the container command
+## This deployment: `hermes-sandbox` on Docker Desktop
+
+- Container name: **hermes-sandbox**, image **hermes-sandbox-image:latest**
+- `Cmd: ["sleep", "infinity"]`, `Entrypoint: ["docker-entrypoint.sh"]`
+  (`/usr/local/bin/docker-entrypoint.sh`, the stock Node image entrypoint).
+- **Docker Desktop GUI cannot edit the Cmd of an existing container** (Inspect is
+  read-only), so Option A's command override is not reachable from the GUI here.
+
+### Chosen method — entrypoint hook (survives Stop/Start)
+
+The entrypoint runs on every container start, so the boot call is injected there,
+just before `exec "$@"`:
+
+```sh
+HERMES_BOOT=/workspace/hermes-agent-plugin/scripts/herprofiles_boot.sh
+if [ -f "$HERMES_BOOT" ]; then
+  bash "$HERMES_BOOT" || true
+fi
+```
+
+- The original is backed up at
+  `/usr/local/bin/docker-entrypoint.sh.bak.pre-hermes-autostart`.
+- This edit is in the container's **writable layer**: it **survives Stop/Start**
+  (same container) but is **lost on recreate/rebuild** from the image.
+- To verify: in Docker Desktop, Stop then Start `hermes-sandbox`; all four
+  gateways should come up (`✓ telegram connected` in each profile log).
+
+### Make it permanent across recreate (host-side, in the Dockerfile)
+
+The edit above is not in a volume, so rebuilding the image drops it. To bake it
+in, add this to the `hermes-sandbox-image` Dockerfile (on the host) after the
+entrypoint exists:
+
+```dockerfile
+RUN sed -i 's|^exec "\$@"|HERMES_BOOT=/workspace/hermes-agent-plugin/scripts/herprofiles_boot.sh\nif [ -f "$HERMES_BOOT" ]; then bash "$HERMES_BOOT" || true; fi\n\nexec "$@"|' /usr/local/bin/docker-entrypoint.sh
+```
+
+## Option A — bake the boot script into the container command
 
 Do this once; afterwards every Start brings up all four agents automatically.
 
