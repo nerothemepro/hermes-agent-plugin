@@ -7,3 +7,4 @@ provides_tools:
   - generate_video
   - generate_video_sequence
   - generate_ltx_video
+  - generate_ltx_video_sequence

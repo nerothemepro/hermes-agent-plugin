@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from tools.registry import tool_error, tool_result
 PIPELINE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video.py")
 SEQUENCE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video_sequence.py")
 LTX_PIPELINE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_ltx_video.py")
+LTX_SEQUENCE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_ltx_video_sequence.py")
 DEFAULT_ENV_FILE = Path("/opt/data/hermes/media-pipeline.env")
 DEFAULT_VIDEO_DIR = Path("/opt/data/hermes/generated-videos")
 SMOKE_IMAGE = Path("/workspace/projects/media-pipeline/test_assets/wan_i2v_smoke_input.png")
@@ -69,6 +71,86 @@ GENERATE_LTX_VIDEO_SCHEMA: dict[str, Any] = {
             "steps": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Sampler steps. Lower values are faster and safer for smoke tests."},
             "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Optional deterministic seed."},
             "timeout_seconds": {"type": "integer", "default": 1800, "minimum": 120, "maximum": 7200, "description": "Maximum wall-clock time for the LTX render."},
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    },
+}
+
+
+GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
+    "name": "generate_ltx_video_sequence",
+    "description": (
+        "Generate a LONG multi-shot LTX-2.3 video (roughly 10-75 seconds) by rendering several short shots "
+        "and stitching them into one mp4. Use this whenever the user wants a video longer than a single ~5s "
+        "LTX clip. Each shot is rendered with the same engine as generate_ltx_video; by default the last frame "
+        "of each shot becomes the first frame of the next shot so the action stays continuous. "
+        "For the best long-form result, pass an explicit `shots` array where each item is the prompt for one "
+        "consecutive ~5s beat of the action (e.g. 12 shots for a ~60s fight). If `shots` is omitted, the tool "
+        "auto-splits `prompt` into shots based on total_duration_seconds. Rendering many shots is slow "
+        "(each shot is a full LTX render on the RTX 3090), so this can take several minutes. The tool returns "
+        "a MEDIA:/absolute/path to the final stitched video for Telegram delivery."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Overall scene/action description. Used for the output name and as the fallback when `shots` is not provided.",
+            },
+            "shots": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Preferred. Ordered list of per-shot English prompts, one per ~5s beat. Provide 12-15 shots for a 60-75s video. Each shot should describe a distinct moment of motion that continues from the previous one.",
+            },
+            "total_duration_seconds": {
+                "type": "integer",
+                "minimum": 6,
+                "maximum": 90,
+                "default": 60,
+                "description": "Target total length when `shots` is omitted. The tool computes shot count = ceil(total / shot_duration_seconds).",
+            },
+            "shot_duration_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 5,
+                "description": "Length of each individual shot in seconds. Capped at 5 by the single-shot LTX engine.",
+            },
+            "continuity": {
+                "type": "string",
+                "enum": ["last_frame", "independent"],
+                "default": "last_frame",
+                "description": "last_frame chains each shot from the previous shot's final frame (smooth continuity, but quality can drift over many shots). independent generates a fresh keyframe per shot (sharper per shot, less continuous).",
+            },
+            "input_image_path": {
+                "type": "string",
+                "description": "Optional first-frame image for shot 1. If omitted, a keyframe is generated automatically.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "standard", "quality"],
+                "default": "standard",
+                "description": "Per-shot render preset. standard (512x320 8fps) is the safe default; test for fast plumbing checks; quality (768x512 16fps) is heavier and slower per shot.",
+            },
+            "style": {
+                "type": "string",
+                "enum": ["realistic", "product", "travel", "social_ad", "anime"],
+                "default": "realistic",
+                "description": "Keyframe style hint used when a keyframe must be generated.",
+            },
+            "keyframe_engine": {
+                "type": "string",
+                "enum": ["auto", "flux", "animagine"],
+                "default": "auto",
+                "description": "Keyframe renderer used when a keyframe must be generated.",
+            },
+            "width": {"type": "integer", "minimum": 256, "maximum": 1280, "description": "Optional width override applied to every shot. Keep 512 for safe RTX 3090 runs."},
+            "height": {"type": "integer", "minimum": 256, "maximum": 720, "description": "Optional height override applied to every shot. Keep 320 for safe RTX 3090 runs."},
+            "fps": {"type": "integer", "minimum": 8, "maximum": 24, "description": "Optional fps override applied to every shot. All shots must share fps for clean stitching."},
+            "steps": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Optional sampler steps override applied to every shot."},
+            "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Optional base seed; shot N uses seed+N."},
+            "timeout_seconds": {"type": "integer", "default": 7200, "minimum": 300, "maximum": 14400, "description": "Overall wall-clock budget for the whole sequence across all shots."},
         },
         "required": ["prompt"],
         "additionalProperties": False,
@@ -415,6 +497,115 @@ def handle_generate_ltx_video(args: dict[str, Any], **kw) -> str:
         return tool_error(f"generate_ltx_video timed out after {timeout} seconds")
     except Exception as exc:
         return tool_error(f"generate_ltx_video failed: {type(exc).__name__}: {exc}")
+
+
+def _coerce_seq_timeout(value: Any) -> int:
+    try:
+        timeout = int(value)
+    except Exception:
+        timeout = 7200
+    return max(300, min(14400, timeout))
+
+
+def handle_generate_ltx_video_sequence(args: dict[str, Any], **kw) -> str:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return tool_error("prompt is required")
+    if not LTX_SEQUENCE_SCRIPT.exists():
+        return tool_error(f"LTX sequence pipeline script not found: {LTX_SEQUENCE_SCRIPT}")
+
+    mode = _coerce_ltx_mode(args.get("mode"))
+    style = _coerce_ltx_style(args.get("style"))
+    keyframe_engine = _coerce_keyframe_engine(args.get("keyframe_engine"))
+    continuity = str(args.get("continuity") or "last_frame").strip().lower()
+    if continuity not in {"last_frame", "independent"}:
+        continuity = "last_frame"
+    timeout = _coerce_seq_timeout(args.get("timeout_seconds"))
+    input_image = str(args.get("input_image_path") or "").strip()
+    seed = _coerce_optional_seed(args.get("seed"))
+    total_duration = _coerce_ltx_optional_int(args.get("total_duration_seconds"), 6, 90) or 60
+    shot_duration = _coerce_ltx_optional_int(args.get("shot_duration_seconds"), 1, 5) or 5
+
+    shots = args.get("shots")
+    shots_file: Path | None = None
+    if isinstance(shots, list) and shots:
+        cleaned = [" ".join(str(s).strip().split()) for s in shots if str(s).strip()]
+        if cleaned:
+            fd = tempfile.NamedTemporaryFile("w", suffix=".json", prefix="ltx_shots_", delete=False, encoding="utf-8")
+            try:
+                json.dump(cleaned, fd, ensure_ascii=False)
+            finally:
+                fd.close()
+            shots_file = Path(fd.name)
+
+    cmd = [
+        sys.executable, str(LTX_SEQUENCE_SCRIPT),
+        "--prompt", prompt,
+        "--mode", mode,
+        "--style", style,
+        "--keyframe-engine", keyframe_engine,
+        "--continuity", continuity,
+        "--total-duration-seconds", str(total_duration),
+        "--shot-duration-seconds", str(shot_duration),
+    ]
+    if DEFAULT_ENV_FILE.exists():
+        cmd.extend(["--env-file", str(DEFAULT_ENV_FILE)])
+    if shots_file is not None:
+        cmd.extend(["--shots-file", str(shots_file)])
+    if input_image:
+        cmd.extend(["--input-image", input_image])
+    for arg_name, cli_name, low, high in (
+        ("width", "--width", 256, 1280),
+        ("height", "--height", 256, 720),
+        ("fps", "--fps", 8, 24),
+        ("steps", "--steps", 1, 30),
+    ):
+        value = _coerce_ltx_optional_int(args.get(arg_name), low, high)
+        if value is not None:
+            cmd.extend([cli_name, str(value)])
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(LTX_SEQUENCE_SCRIPT.parent),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        payload = _parse_pipeline_json(proc.stdout, proc.stderr)
+        if proc.returncode != 0 or payload.get("status") != "completed":
+            errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+            detail = "; ".join(str(item) for item in errors) or proc.stderr[-1600:] or proc.stdout[-1600:]
+            return tool_error(f"generate_ltx_video_sequence failed: {detail}")
+        video_path, size = _verify_video_path(payload.get("final_video_path"))
+        result = {
+            "success": True,
+            "status": "completed",
+            "workflow": payload.get("workflow"),
+            "final_video_path": str(video_path),
+            "media": f"MEDIA:{video_path}",
+            "send_to_user": f"MEDIA:{video_path}",
+            "size_bytes": size,
+            "shot_count": payload.get("shot_count"),
+            "continuity": payload.get("continuity"),
+            "manifest_path": payload.get("manifest_path"),
+            "settings": payload.get("settings"),
+            "runtime_seconds": payload.get("runtime_seconds"),
+            "warnings": payload.get("warnings"),
+            "note": "Send the media field verbatim to deliver the stitched LTX video on Telegram.",
+        }
+        return tool_result(result)
+    except subprocess.TimeoutExpired:
+        return tool_error(f"generate_ltx_video_sequence timed out after {timeout} seconds")
+    except Exception as exc:
+        return tool_error(f"generate_ltx_video_sequence failed: {type(exc).__name__}: {exc}")
+    finally:
+        if shots_file is not None:
+            shots_file.unlink(missing_ok=True)
+
 
 def _coerce_mode(value: Any) -> str:
     mode = str(value or "quality").strip().lower()
