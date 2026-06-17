@@ -76,7 +76,7 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 ## Source Areas
 
 - `hermes-plugin/local_media/tools.py`  
-  Hermes local media tool definitions/handlers. Current WIP adds `generate_ltx_video`.
+  Hermes local media tool definitions/handlers, including `generate_ltx_video` for LTX-2.3 single-shot renders.
 
 - `media-pipeline/generate_video.py`  
   Existing single-shot Wan2.1/Flux/Animagine pipeline.
@@ -85,25 +85,17 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
   Existing multi-shot Wan2.1 sequence pipeline.
 
 - `media-pipeline/generate_ltx_video.py`  
-  New WIP LTX-2.3 single-shot pipeline. Validate and finish this before adding multi-shot LTX.
+  LTX-2.3 single-shot pipeline. Phase 1 smoke render has passed; review before adding multi-shot LTX.
 
 - `media-pipeline/workflows/ltx_2_3_i2v_api.json`  
-  New WIP native local ComfyUI API workflow for LTX-2.3. It uses local model nodes, not the Comfy cloud/API node.
+  Native local ComfyUI API workflow for LTX-2.3. It uses local model nodes, not the Comfy cloud/API node.
 
 - `bin/oarai-camp-availability`, `src/oaraiCampAvailability.js`, `test/oarai-camp-availability.test.js`  
   Oarai Camp availability tool source/test files.
 
-## Current WIP As Of 2026-06-17
+## Current LTX State As Of 2026-06-17
 
-Git status before handoff showed these uncommitted changes:
-
-```text
- M hermes-plugin/local_media/tools.py
-?? media-pipeline/generate_ltx_video.py
-?? media-pipeline/workflows/ltx_2_3_i2v_api.json
-```
-
-The WIP adds an explicit `generate_ltx_video` Hermes tool and a native local LTX-2.3 ComfyUI workflow. Static validation passed:
+Latest LTX implementation was committed and pushed as `ad54a57 Implement HerVid LTX 2.3 single-shot tool`. Expected git status is clean (`main...origin/main`). The implementation adds an explicit `generate_ltx_video` Hermes tool and a native local LTX-2.3 ComfyUI workflow. Static validation passed:
 
 ```bash
 python3 -m py_compile   /workspace/hermes-agent-plugin/media-pipeline/generate_ltx_video.py   /workspace/hermes-agent-plugin/hermes-plugin/local_media/tools.py   /workspace/projects/media-pipeline/generate_ltx_video.py   /workspace/hermes-agent/plugins/local_media/tools.py
@@ -111,7 +103,7 @@ python3 -m py_compile   /workspace/hermes-agent-plugin/media-pipeline/generate_l
 python3 /workspace/projects/media-pipeline/generate_ltx_video.py   --prompt 'a cinematic close-up of a white ceramic coffee cup on a wooden table, morning sunlight, gentle steam rising, slow push-in camera, no text, no watermark'   --mode test   --validate-only
 ```
 
-`--validate-only` returned `status=validated` with the expected LTX model names. A short render smoke test was attempted after that, but no new LTX output video was confirmed before this handoff. The next agent should validate/render again and inspect ComfyUI logs if it fails.
+`--validate-only` returned `status=validated` with the expected LTX model names. A native LTX smoke render also passed at `512x320`, `1s`, `8fps`, `1 step`, outputting `/opt/data/hermes/generated-videos/two-original-anime-samurai-warriors-hold-a-dramatic-1781684597-a0d320f5.mp4`. Higher `768x512` settings OOMed in the current runtime, so defaults are intentionally conservative.
 
 ## Recommended Reading Order For New Agent
 
