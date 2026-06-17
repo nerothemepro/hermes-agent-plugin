@@ -54,8 +54,11 @@ LTX_NEGATIVE_PROMPT = (
 
 MODE_PRESETS: dict[str, dict[str, Any]] = {
     "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False},
-    "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 6, "prompt_enhance": False},
-    "quality": {"width": 768, "height": 512, "duration": 3, "fps": 16, "steps": 8, "prompt_enhance": False},
+    "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False},
+    # quality envelope proven on RTX 3090: 768x512, 41 frames (5s@8fps), 20 steps
+    # completes in ~254s/shot with no OOM. Higher fps at 5s raises frame count and
+    # VRAM, so quality stays at 8fps natively (smooth via post-interpolation later).
+    "quality": {"width": 768, "height": 512, "duration": 5, "fps": 8, "steps": 20, "prompt_enhance": False},
 }
 
 
@@ -102,6 +105,8 @@ def run_keyframe_generator(args: argparse.Namespace, env: dict[str, str], base: 
     ]
     if args.style == "anime":
         cmd.extend(["--keyframe-frame-mode", "single_scene"])
+    if getattr(args, "keyframe_seed", None) is not None:
+        cmd.extend(["--seed", str(args.keyframe_seed)])
     if Path(args.env_file).exists():
         cmd.extend(["--env-file", args.env_file])
     proc = subprocess.run(
@@ -278,6 +283,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         input_image = run_keyframe_generator(args, env, base, min(timeout_seconds, 1200))
         keyframe_generated = True
         warnings.append("input_image_path was omitted; generated a keyframe with the existing Hermes keyframe pipeline")
+        # Unload the keyframe model (e.g. Flux) from VRAM before loading the
+        # LTX-2.3 22B model. Otherwise both stay resident in ComfyUI and OOM the
+        # RTX 3090 — this is the failure independent-mode sequences hit.
+        try:
+            http_json("POST", endpoint(comfy_url, "/free"), {"unload_models": True, "free_memory": True}, timeout=http_timeout)
+            time.sleep(2)
+        except Exception as exc:
+            warnings.append(f"ComfyUI /free after keyframe failed (continuing): {exc}")
 
     upload_name = f"hermes_ltx_{base}{Path(input_image).suffix.lower()}"
     upload_result = upload_image(comfy_url, input_image, upload_name)
@@ -355,6 +368,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--workflow", default=DEFAULT_LTX_WORKFLOW)
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--keyframe-seed", dest="keyframe_seed", type=int, help="Fixed seed for keyframe generation (used when no --input-image is given). Helps keep characters consistent across shots in a sequence.")
     parser.add_argument("--validate-only", action="store_true", help="Validate ComfyUI nodes/models/settings without queueing a render")
     return parser.parse_args(argv)
 

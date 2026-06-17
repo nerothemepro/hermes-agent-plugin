@@ -120,8 +120,18 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
             "continuity": {
                 "type": "string",
                 "enum": ["last_frame", "independent"],
-                "default": "last_frame",
-                "description": "last_frame chains each shot from the previous shot's final frame (smooth continuity, but quality can drift over many shots). independent generates a fresh keyframe per shot (sharper per shot, less continuous).",
+                "default": "independent",
+                "description": "independent (recommended for long videos) generates a fresh keyframe per shot so quality and style do NOT drift over many shots; pair it with character_note to keep the same subjects. last_frame chains each shot from the previous shot's final frame (smoother continuity but quality drifts badly past ~3-4 shots).",
+            },
+            "character_note": {
+                "type": "string",
+                "description": "Shared character/style anchor appended to EVERY shot prompt so independent shots keep the same subjects. Strongly recommended for independent mode. Example: 'the same two original anime samurai, one in a black robe, one in a red robe, consistent faces and weapons, medium shot with faces clearly visible, cinematic anime style, no text, no watermark'.",
+            },
+            "keyframe_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional fixed seed for per-shot keyframe generation, for extra cross-shot character consistency.",
             },
             "input_image_path": {
                 "type": "string",
@@ -517,12 +527,14 @@ def handle_generate_ltx_video_sequence(args: dict[str, Any], **kw) -> str:
     mode = _coerce_ltx_mode(args.get("mode"))
     style = _coerce_ltx_style(args.get("style"))
     keyframe_engine = _coerce_keyframe_engine(args.get("keyframe_engine"))
-    continuity = str(args.get("continuity") or "last_frame").strip().lower()
+    continuity = str(args.get("continuity") or "independent").strip().lower()
     if continuity not in {"last_frame", "independent"}:
-        continuity = "last_frame"
+        continuity = "independent"
     timeout = _coerce_seq_timeout(args.get("timeout_seconds"))
     input_image = str(args.get("input_image_path") or "").strip()
+    character_note = " ".join(str(args.get("character_note") or "").split())
     seed = _coerce_optional_seed(args.get("seed"))
+    keyframe_seed = _coerce_optional_seed(args.get("keyframe_seed"))
     total_duration = _coerce_ltx_optional_int(args.get("total_duration_seconds"), 6, 90) or 60
     shot_duration = _coerce_ltx_optional_int(args.get("shot_duration_seconds"), 1, 5) or 5
 
@@ -552,6 +564,10 @@ def handle_generate_ltx_video_sequence(args: dict[str, Any], **kw) -> str:
         cmd.extend(["--env-file", str(DEFAULT_ENV_FILE)])
     if shots_file is not None:
         cmd.extend(["--shots-file", str(shots_file)])
+    if character_note:
+        cmd.extend(["--character-note", character_note])
+    if keyframe_seed is not None:
+        cmd.extend(["--keyframe-seed", str(keyframe_seed)])
     if input_image:
         cmd.extend(["--input-image", input_image])
     for arg_name, cli_name, low, high in (

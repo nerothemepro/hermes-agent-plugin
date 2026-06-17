@@ -169,10 +169,18 @@ def load_shot_prompts(args: argparse.Namespace) -> list[str]:
 
 def render_shot(args: argparse.Namespace, prompt: str, index: int, total: int, input_image: str | None, seed: int) -> dict[str, Any]:
     shot_dur = clamp_int(args.shot_duration_seconds, 1, 5)
+    # Anchor character/style identity: append the shared character note so every
+    # shot's keyframe (and the LTX text conditioning) describes the same subjects.
+    # This is what keeps independent per-shot keyframes from drifting apart.
+    effective_prompt = prompt
+    if args.character_note:
+        note = " ".join(args.character_note.strip().split())
+        if note:
+            effective_prompt = f"{prompt} {note}"
     cmd = [
         sys.executable,
         SINGLE_SHOT_SCRIPT,
-        "--prompt", prompt,
+        "--prompt", effective_prompt,
         "--mode", args.mode,
         "--style", args.style,
         "--keyframe-engine", args.keyframe_engine,
@@ -186,6 +194,10 @@ def render_shot(args: argparse.Namespace, prompt: str, index: int, total: int, i
     for cli_name, value in (("--width", args.width), ("--height", args.height), ("--fps", args.fps), ("--steps", args.steps)):
         if value is not None:
             cmd.extend([cli_name, str(value)])
+    # A fixed keyframe seed keeps the auto-generated keyframes visually
+    # consistent across independent shots.
+    if input_image is None and args.keyframe_seed is not None:
+        cmd.extend(["--keyframe-seed", str(args.keyframe_seed)])
     if input_image:
         cmd.extend(["--input-image", input_image])
     proc = subprocess.run(cmd, cwd=str(PROJECT_DIR), text=True, capture_output=True, timeout=args.per_shot_timeout_seconds, check=False)
@@ -309,7 +321,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--mode", choices=["test", "standard", "quality"], default="standard")
     parser.add_argument("--style", choices=["realistic", "product", "travel", "social_ad", "anime"], default="realistic")
     parser.add_argument("--keyframe-engine", dest="keyframe_engine", choices=["auto", "flux", "animagine"], default="auto")
-    parser.add_argument("--continuity", choices=["last_frame", "independent"], default="last_frame")
+    parser.add_argument("--continuity", choices=["last_frame", "independent"], default="independent",
+                        help="independent (default) generates a fresh keyframe per shot to avoid cumulative drift over long sequences; last_frame chains each shot from the previous tail frame (smoother but drifts).")
+    parser.add_argument("--character-note", dest="character_note", default="",
+                        help="Shared character/style description appended to every shot prompt so independent shots keep the same subjects (e.g. 'the same two original anime samurai, one in black robe, one in red robe, consistent faces, cinematic anime style').")
+    parser.add_argument("--keyframe-seed", dest="keyframe_seed", type=int, default=None,
+                        help="Fixed seed for per-shot keyframe generation, for extra cross-shot consistency.")
     parser.add_argument("--input-image", dest="input_image", default="")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
