@@ -6,3 +6,4 @@ kind: standalone
 provides_tools:
   - generate_video
   - generate_video_sequence
+  - generate_ltx_video
