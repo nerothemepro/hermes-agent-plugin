@@ -17,10 +17,63 @@ from tools.registry import tool_error, tool_result
 
 PIPELINE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video.py")
 SEQUENCE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_video_sequence.py")
+LTX_PIPELINE_SCRIPT = Path("/workspace/projects/media-pipeline/generate_ltx_video.py")
 DEFAULT_ENV_FILE = Path("/opt/data/hermes/media-pipeline.env")
 DEFAULT_VIDEO_DIR = Path("/opt/data/hermes/generated-videos")
 SMOKE_IMAGE = Path("/workspace/projects/media-pipeline/test_assets/wan_i2v_smoke_input.png")
 ALLOWED_VIDEO_DIRS = (DEFAULT_VIDEO_DIR.resolve(),)
+
+
+GENERATE_LTX_VIDEO_SCHEMA: dict[str, Any] = {
+    "name": "generate_ltx_video",
+    "description": (
+        "Generate a short realistic/cinematic/product/travel/social video through local ComfyUI LTX-2.3 I2V. "
+        "Use this when HerVid needs LTX-2.3 instead of Wan2.1, especially for realistic marketing, product, "
+        "travel, lifestyle, and social clips. Prefer mode=test for smoke checks; standard is the safe default "
+        "for real use on RTX 3090. The tool saves the final mp4 under /opt/data/hermes/generated-videos and "
+        "returns a MEDIA:/absolute/path directive suitable for Telegram delivery."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Detailed English video prompt describing subject, motion over time, camera movement, lighting, and constraints such as no text/no watermark.",
+            },
+            "input_image_path": {
+                "type": "string",
+                "description": "Optional first-frame image path. If omitted, the pipeline generates a keyframe using the existing Hermes image/keyframe pipeline.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "standard", "quality"],
+                "default": "test",
+                "description": "test=1s 512x320 8fps; standard=3s 512x320 8fps; quality=3s 768x512 16fps and may require freeing VRAM first.",
+            },
+            "style": {
+                "type": "string",
+                "enum": ["realistic", "product", "travel", "social_ad", "anime"],
+                "default": "realistic",
+                "description": "Keyframe style hint when input_image_path is omitted. LTX is recommended for realistic/product/travel/social_ad; use Wan for anime action.",
+            },
+            "keyframe_engine": {
+                "type": "string",
+                "enum": ["auto", "flux", "animagine"],
+                "default": "auto",
+                "description": "Keyframe renderer used only when input_image_path is omitted.",
+            },
+            "width": {"type": "integer", "minimum": 256, "maximum": 1280, "description": "Optional width override. Keep 512 for safest RTX 3090 LTX smoke runs."},
+            "height": {"type": "integer", "minimum": 256, "maximum": 720, "description": "Optional height override. Keep 320 for safest RTX 3090 LTX smoke runs."},
+            "duration": {"type": "integer", "minimum": 1, "maximum": 5, "description": "Single-shot duration in seconds. Values above 5 are intentionally rejected for Phase 1."},
+            "fps": {"type": "integer", "minimum": 8, "maximum": 24, "description": "Frames per second. 8 is the safest smoke default; 16 may need more VRAM."},
+            "steps": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Sampler steps. Lower values are faster and safer for smoke tests."},
+            "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Optional deterministic seed."},
+            "timeout_seconds": {"type": "integer", "default": 1800, "minimum": 120, "maximum": 7200, "description": "Maximum wall-clock time for the LTX render."},
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    },
+}
 
 GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
     "name": "generate_video_sequence",
@@ -271,6 +324,97 @@ GENERATE_VIDEO_SCHEMA: dict[str, Any] = {
     },
 }
 
+
+
+def _coerce_ltx_mode(value: Any) -> str:
+    mode = str(value or "test").strip().lower()
+    return mode if mode in {"test", "standard", "quality"} else "test"
+
+
+def _coerce_ltx_style(value: Any) -> str:
+    style = str(value or "realistic").strip().lower()
+    return style if style in {"realistic", "product", "travel", "social_ad", "anime"} else "realistic"
+
+
+def _coerce_ltx_optional_int(value: Any, low: int, high: int) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = int(value)
+    except Exception:
+        return None
+    return max(low, min(high, number))
+
+
+def handle_generate_ltx_video(args: dict[str, Any], **kw) -> str:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return tool_error("prompt is required")
+    if not LTX_PIPELINE_SCRIPT.exists():
+        return tool_error(f"LTX media pipeline script not found: {LTX_PIPELINE_SCRIPT}")
+
+    mode = _coerce_ltx_mode(args.get("mode"))
+    style = _coerce_ltx_style(args.get("style"))
+    keyframe_engine = _coerce_keyframe_engine(args.get("keyframe_engine"))
+    timeout = _coerce_timeout(args.get("timeout_seconds"))
+    input_image = str(args.get("input_image_path") or "").strip()
+    seed = _coerce_optional_seed(args.get("seed"))
+
+    cmd = [sys.executable, str(LTX_PIPELINE_SCRIPT), "--prompt", prompt, "--mode", mode, "--style", style, "--keyframe-engine", keyframe_engine]
+    if DEFAULT_ENV_FILE.exists():
+        cmd.extend(["--env-file", str(DEFAULT_ENV_FILE)])
+    if input_image:
+        cmd.extend(["--input-image", input_image])
+    for arg_name, cli_name, low, high in (
+        ("width", "--width", 256, 1280),
+        ("height", "--height", 256, 720),
+        ("duration", "--duration", 1, 5),
+        ("fps", "--fps", 8, 24),
+        ("steps", "--steps", 1, 30),
+    ):
+        value = _coerce_ltx_optional_int(args.get(arg_name), low, high)
+        if value is not None:
+            cmd.extend([cli_name, str(value)])
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(LTX_PIPELINE_SCRIPT.parent),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        payload = _parse_pipeline_json(proc.stdout, proc.stderr)
+        if proc.returncode != 0 or payload.get("status") != "completed":
+            errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+            detail = "; ".join(str(item) for item in errors) or proc.stderr[-1600:] or proc.stdout[-1600:]
+            return tool_error(f"generate_ltx_video failed: {detail}")
+        video_path, size = _verify_video_path(payload.get("video_path"))
+        result = {
+            "success": True,
+            "status": "completed",
+            "workflow": payload.get("workflow"),
+            "video_path": str(video_path),
+            "media": f"MEDIA:{video_path}",
+            "send_to_user": f"MEDIA:{video_path}",
+            "size_bytes": size,
+            "input_image_path": payload.get("input_image_path"),
+            "keyframe_generated": payload.get("keyframe_generated"),
+            "settings": payload.get("settings"),
+            "models": payload.get("models"),
+            "runtime_seconds": payload.get("runtime_seconds"),
+            "warnings": payload.get("warnings"),
+            "comfyui": payload.get("comfyui"),
+            "note": "Send the media field verbatim to deliver the LTX video on Telegram.",
+        }
+        return tool_result(result)
+    except subprocess.TimeoutExpired:
+        return tool_error(f"generate_ltx_video timed out after {timeout} seconds")
+    except Exception as exc:
+        return tool_error(f"generate_ltx_video failed: {type(exc).__name__}: {exc}")
 
 def _coerce_mode(value: Any) -> str:
     mode = str(value or "quality").strip().lower()

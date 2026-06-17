@@ -102,10 +102,10 @@ User sends video request > 5 seconds
   "video_path": "/opt/data/hermes/generated-videos/<slug>.mp4",
   "image_path": "/opt/data/hermes/generated-images/<slug>-keyframe.png",
   "settings": {
-    "width": 768,
-    "height": 512,
-    "duration": 3,
-    "fps": 16,
+    "width": 512,
+    "height": 320,
+    "duration": 1,
+    "fps": 8,
     "prompt_enhance": false,
     "seed": 12345
   },
@@ -180,10 +180,10 @@ On failure:
 
 | Parameter | test | standard | quality |
 |-----------|------|----------|---------|
-| width | 768 | 768 | 1024 |
-| height | 512 | 512 | 576 |
-| duration (seconds) | 3 | 5 | 5 |
-| fps | 16 | 16 | 24 |
+| width | 512 | 512 | 768 |
+| height | 320 | 320 | 512 |
+| duration (seconds) | 1 | 3 | 3 |
+| fps | 8 | 8 | 16 |
 | prompt_enhance | false | false | true (if VRAM stable) |
 | keyframe_engine | flux | flux | flux |
 | lora_strength | 0.0 (disabled) | 0.8 | 0.8 |

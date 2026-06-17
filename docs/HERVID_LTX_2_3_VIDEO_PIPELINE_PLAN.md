@@ -114,10 +114,10 @@ Expected JSON:
   "video_path": "/opt/data/hermes/generated-videos/example.mp4",
   "input_image_path": "/opt/data/hermes/generated-images/coffee_keyframe.png",
   "settings": {
-    "width": 768,
-    "height": 512,
-    "duration": 3,
-    "fps": 16,
+    "width": 512,
+    "height": 320,
+    "duration": 1,
+    "fps": 8,
     "prompt_enhance": false
   },
   "warnings": [],
@@ -332,10 +332,10 @@ Recommended tool settings:
 
 ```text
 mode=test
-width=768
-height=512
-duration=3
-fps=16
+width=512
+height=320
+duration=1
+fps=8
 prompt_enhance=false
 generate_keyframe=true
 style=product

@@ -80,10 +80,10 @@ Defaults:
 
 ```text
 mode=test
-width=768
-height=512
-duration=3
-fps=16
+width=512
+height=320
+duration=1
+fps=8
 prompt_enhance=false
 timeout_seconds=1800
 output_dir=/opt/data/hermes/generated-videos
@@ -100,10 +100,10 @@ Expected JSON:
   "prompt": "final prompt used",
   "settings": {
     "mode": "test",
-    "width": 768,
-    "height": 512,
-    "duration": 3,
-    "fps": 16,
+    "width": 512,
+    "height": 320,
+    "duration": 1,
+    "fps": 8,
     "prompt_enhance": false
   },
   "comfyui": {
