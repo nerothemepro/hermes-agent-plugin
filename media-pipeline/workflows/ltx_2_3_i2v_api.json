@@ -65,12 +65,6 @@
       "text": "text, watermark, logo, low quality, blurry, distorted motion"
     }
   },
-  "7": {
-    "class_type": "LTXVAudioVAELoader",
-    "inputs": {
-      "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors"
-    }
-  },
   "8": {
     "class_type": "LTXVConditioning",
     "inputs": {

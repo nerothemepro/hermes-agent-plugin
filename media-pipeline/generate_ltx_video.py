@@ -152,7 +152,6 @@ def ensure_model_available(object_info: dict[str, Any], class_type: str, input_n
 def validate_ltx_models(object_info: dict[str, Any], env: dict[str, str]) -> None:
     ensure_model_available(object_info, "CheckpointLoaderSimple", "ckpt_name", cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT))
     ensure_model_available(object_info, "LTXAVTextEncoderLoader", "ckpt_name", cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT))
-    ensure_model_available(object_info, "LTXVAudioVAELoader", "ckpt_name", cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT))
     ensure_model_available(object_info, "LTXAVTextEncoderLoader", "text_encoder", cfg(env, "LTX_TEXT_ENCODER_NAME", LTX_TEXT_ENCODER))
     ensure_model_available(object_info, "LoraLoader", "lora_name", cfg(env, "LTX_DISTILLED_LORA_NAME", LTX_DISTILLED_LORA))
     ensure_model_available(object_info, "LoraLoader", "lora_name", cfg(env, "LTX_GEMMA_LORA_NAME", LTX_GEMMA_LORA))
@@ -178,7 +177,6 @@ def patch_ltx_workflow(
     set_node_input(patched, "LTXAVTextEncoderLoader", "ckpt_name", checkpoint)
     set_node_input(patched, "LTXAVTextEncoderLoader", "text_encoder", cfg(env, "LTX_TEXT_ENCODER_NAME", LTX_TEXT_ENCODER))
     set_node_input(patched, "LTXAVTextEncoderLoader", "device", cfg(env, "LTX_TEXT_ENCODER_DEVICE", "cpu"))
-    set_node_input(patched, "LTXVAudioVAELoader", "ckpt_name", checkpoint)
     set_node_input(patched, "LoraLoader", "lora_name", cfg(env, "LTX_DISTILLED_LORA_NAME", LTX_DISTILLED_LORA), 0)
     set_node_input(patched, "LoraLoader", "lora_name", cfg(env, "LTX_GEMMA_LORA_NAME", LTX_GEMMA_LORA), 1)
     set_node_input(patched, "CLIPTextEncode", "text", prompt, 0)
