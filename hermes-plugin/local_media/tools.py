@@ -50,7 +50,7 @@ GENERATE_LTX_VIDEO_SCHEMA: dict[str, Any] = {
                 "type": "string",
                 "enum": ["test", "standard", "quality"],
                 "default": "test",
-                "description": "test=1s 512x320 8fps; standard=3s 512x320 8fps; quality=3s 768x512 16fps and may require freeing VRAM first.",
+                "description": "test=1s 512x320 8fps; standard=3s 512x320 8fps; quality=5s 768x512 8fps and may require freeing VRAM first.",
             },
             "style": {
                 "type": "string",
@@ -141,7 +141,7 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
                 "type": "string",
                 "enum": ["test", "standard", "quality"],
                 "default": "standard",
-                "description": "Per-shot render preset. standard (512x320 8fps) is the safe default; test for fast plumbing checks; quality (768x512 16fps) is heavier and slower per shot.",
+                "description": "Per-shot render preset. standard (3s 512x320 8fps) is the safe default; test for fast plumbing checks; quality (5s 768x512 8fps) is heavier and slower per shot.",
             },
             "style": {
                 "type": "string",
