@@ -641,16 +641,33 @@ def _coerce_timeout(value: Any) -> int:
 
 
 def _parse_pipeline_json(stdout: str, stderr: str) -> dict[str, Any]:
+    decoder = json.JSONDecoder()
     for raw in (stdout, stderr):
         text = raw.strip()
         if not text:
             continue
+        # Fast path: the stream is exactly one JSON object.
         try:
             payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
         except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return payload
+            pass
+        # Robust fallback: the stream is JSON mixed with non-JSON log/progress
+        # lines. Scan for an embedded JSON object, preferring the last one
+        # (the final result), using raw_decode so multi-line indented JSON works.
+        result: dict[str, Any] | None = None
+        for idx, ch in enumerate(text):
+            if ch != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(text[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                result = payload
+        if result is not None:
+            return result
     raise RuntimeError(
         "media pipeline did not return JSON; "
         f"stdout={stdout[-1000:]!r}; stderr={stderr[-1000:]!r}"

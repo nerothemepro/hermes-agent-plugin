@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from generate_video import cfg, load_env_file, slugify
+from generate_video import cfg, endpoint, http_json, load_env_file, slugify
 
 PROJECT_DIR = Path("/workspace/projects/media-pipeline")
 DEFAULT_ENV_FILE = "/opt/data/hermes/media-pipeline.env"
@@ -38,6 +38,9 @@ DEFAULT_VIDEO_DIR = "/opt/data/hermes/generated-videos"
 DEFAULT_WORK_ROOT = "/opt/data/hermes/media-sequences"
 SINGLE_SHOT_SCRIPT = str(PROJECT_DIR / "generate_ltx_video.py")
 DEFAULT_LTX_WORKFLOW = str(PROJECT_DIR / "workflows/ltx_2_3_i2v_api.json")
+DEFAULT_COMFY_URL = "http://host.docker.internal:8188"
+# Seconds to let the GPU settle after freeing models between shots.
+INTER_SHOT_COOLDOWN_SECONDS = 6
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
@@ -49,6 +52,26 @@ class SequenceError(Exception):
 
 def eprint(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
+
+
+def free_comfy_vram(comfy_url: str) -> None:
+    """Unload all ComfyUI models and free VRAM between shots.
+
+    Without this, the previous shot's resident LTX-2.3 models stay in VRAM while
+    the next shot generates its keyframe (Flux) and reloads LTX, which can push
+    peak VRAM past the RTX 3090's 24GB and crash the shot (especially in quality
+    mode). Best-effort: never fatal on its own.
+    """
+    try:
+        http_json(
+            "POST",
+            endpoint(comfy_url, "/free"),
+            {"unload_models": True, "free_memory": True},
+            timeout=30,
+        )
+        time.sleep(INTER_SHOT_COOLDOWN_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - cooldown is best-effort
+        eprint(f"[sequence] warning: inter-shot ComfyUI /free failed (continuing): {exc}")
 
 
 def clamp_int(value: int, low: int, high: int) -> int:
@@ -247,6 +270,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "errors": [],
         }
 
+    comfy_url = cfg(env, "COMFYUI_BASE_URL", DEFAULT_COMFY_URL)
+
     shots: list[dict[str, Any]] = []
     video_paths: list[Path] = []
     next_input = args.input_image or None
@@ -256,7 +281,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         else:
             shot_input = next_input
         seed = base_seed + index
-        payload = render_shot(args, prompt, index, shot_count, shot_input, seed)
+        # Clear the previous shot's resident models from VRAM before this shot
+        # generates its keyframe and reloads LTX. Prevents cross-shot VRAM
+        # carryover that crashes later shots (notably in quality mode).
+        if index > 0:
+            free_comfy_vram(comfy_url)
+        try:
+            payload = render_shot(args, prompt, index, shot_count, shot_input, seed)
+        except SequenceError as exc:
+            # A shot can fail transiently (GPU left in a bad state by the prior
+            # shot). Free VRAM and retry the shot once before giving up.
+            eprint(f"[sequence] shot {index + 1}/{shot_count} failed, retrying once: {exc}")
+            free_comfy_vram(comfy_url)
+            payload = render_shot(args, prompt, index, shot_count, shot_input, seed)
         video_path = Path(payload["video_path"]).resolve()
         video_paths.append(video_path)
         shots.append({
@@ -356,7 +393,10 @@ def main(argv: list[str] | None = None) -> int:
             "warnings": [],
             "errors": [f"{type(exc).__name__}: {exc}"],
         }
-        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+        # Emit the error payload on stdout (like the success path) so the caller
+        # parses a clean JSON object. stderr carries the human progress log and
+        # would otherwise be mixed with non-JSON lines.
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 1
 
 
