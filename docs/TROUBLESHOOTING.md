@@ -91,3 +91,63 @@ curl -s http://host.docker.internal:8010/health
 ```
 
 Expected `cuda_available=true` and `model_dir_exists=true`.
+
+## LTX-2.3 22B fp8 OOM At KSampler (RTX 3090)
+
+Symptom: `generate_ltx_video.py` returns `GPU OOM while running LTX-2.3`. ComfyUI
+history shows the error at node `KSampler` (`torch.OutOfMemoryError`) with the
+traceback ending in
+`comfy_kitchen/backends/eager/quantization.py:calc_mantissa` → `torch.where`.
+
+This persists even with `--lowvram`, LM Studio fully closed, and ~24GB VRAM free.
+
+Root cause: the model loads fine (~16GB); the OOM is the fp8 **stochastic
+rounding** in ComfyUI's `comfy_kitchen` eager backend. Quantizing each weight
+allocates 5-7 large temporary tensors, so the largest FFN weights push peak VRAM
+past 24GB. `--lowvram` cannot help because the spike is per-weight quantization,
+not the resident model.
+
+Fix: disable stochastic rounding in the `gen-media-comfy` container. Edit
+`/opt/ComfyUI/comfy/ops.py` (~line 1261), change `stochastic_rounding=seed` to
+`stochastic_rounding=0`.
+
+> Use `0`, NOT `None`. `quant_ops.py:96` does `if stochastic_rounding > 0`, and
+> `None > 0` raises `TypeError: '>' not supported between 'NoneType' and 'int'`.
+
+```bash
+docker exec gen-media-comfy sed -i \
+  's/stochastic_rounding=seed/stochastic_rounding=0/' \
+  /opt/ComfyUI/comfy/ops.py
+docker exec gen-media-comfy sed -n '1259,1263p' /opt/ComfyUI/comfy/ops.py  # verify
+docker restart gen-media-comfy
+```
+
+Stochastic rounding only matters for training; for inference the quality impact
+is negligible. After the fix, verified clean: `mode=test` ~350s, `mode=standard`
+~376s, 2-shot `independent` sequence ~753s (10.25s stitched output), no OOM.
+
+> WARNING: this edit lives in the container's writable layer and is LOST when the
+> container is recreated (e.g. when re-adding `--lowvram` or other run flags).
+> Re-apply the `sed` + `restart` above after every `docker rm` / recreate of
+> `gen-media-comfy`. The named volumes (models, custom_nodes, input, output,
+> cache) survive recreate; this code patch does not.
+
+`gen-media-comfy` was created with `docker run` (no compose file). To recreate it
+with `--lowvram` while preserving data:
+
+```bash
+docker stop gen-media-comfy && docker rm gen-media-comfy
+docker run -d --name gen-media-comfy --gpus all \
+  -p 127.0.0.1:8188:8188 \
+  -e PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,garbage_collection_threshold:0.6 \
+  -v genmedia-comfy-models:/opt/ComfyUI/models \
+  -v genmedia-comfy-custom-nodes:/opt/ComfyUI/custom_nodes \
+  -v genmedia-comfy-input:/input \
+  -v genmedia-comfy-output:/output \
+  -v genmedia-comfy-cache:/root/.cache \
+  --restart unless-stopped \
+  gen-media-comfy:gpu \
+  python main.py --listen 0.0.0.0 --port 8188 \
+    --input-directory /input --output-directory /output --lowvram
+# then re-apply the ops.py patch above
+```
