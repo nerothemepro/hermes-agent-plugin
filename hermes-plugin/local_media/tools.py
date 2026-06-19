@@ -82,8 +82,10 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
     "name": "generate_ltx_video_sequence",
     "description": (
         "Generate a LONG multi-shot LTX-2.3 video (roughly 10-75 seconds) by rendering several short shots "
-        "and stitching them into one mp4. Use this whenever the user wants a video longer than a single ~5s "
-        "LTX clip. Each shot is rendered with the same engine as generate_ltx_video; by default the last frame "
+        "and stitching them into one mp4. This is the DEFAULT tool for ANY multi-shot or long video "
+        "(action sequences, cinematic scenes, realistic footage, 10-75 second videos) — i.e. whenever the "
+        "user wants a video longer than a single ~5s LTX clip — UNLESS the user explicitly asks for the "
+        "Wan2.1 pipeline. Each shot is rendered with the same engine as generate_ltx_video; by default the last frame "
         "of each shot becomes the first frame of the next shot so the action stays continuous. "
         "For the best long-form result, pass an explicit `shots` array where each item is the prompt for one "
         "consecutive ~5s beat of the action (e.g. 12 shots for a ~60s fight). If `shots` is omitted, the tool "
@@ -170,8 +172,10 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
 GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
     "name": "generate_video_sequence",
     "description": (
-        "Generate a longer multi-shot local video through the user's ComfyUI + Wan2.1 pipeline. "
-        "Use this for action sequences, multiple shots, or 15-30 second videos. For anime action, "
+        "Generate a multi-shot local video through the user's ComfyUI + Wan2.1 FLF2V pipeline. "
+        "PREFER generate_ltx_video_sequence for general long / multi-shot / cinematic / realistic videos "
+        "(10-75s); use THIS Wan tool ONLY when the user explicitly asks for the Wan2.1 pipeline or its "
+        "anime_action FLF2V style. For anime action, "
         "create original Japanese shonen anime sword-fight scenes with close-ups, dynamic camera "
         "movement, readable choreography, elemental effects, and no copyrighted characters, text, "
         "watermark, logo, or gore. Default duration is 20 seconds, default style_preset is "
