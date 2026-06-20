@@ -79,6 +79,21 @@ DEFAULT_FACE_FIDELITY = 0.5
 FACE_RESTORE_LOADER_CLASS = "FaceRestoreModelLoader"
 FACE_RESTORE_CLASS = "FaceRestoreCFWithModel"
 
+# Animation detection. For cartoon/anime/Pixar content we (1) skip CodeFormer
+# face restoration — it is trained on real human faces and either distorts a
+# stylized face or sharpens a wrong human that drifted in — and (2) add human
+# blocking negatives so a vaguely-described shot (e.g. "a forest full of
+# fireflies") does not render real people instead of the cartoon character.
+ANIMATION_KEYWORDS = (
+    "pixar", "cartoon", "animation", "animated", "anime", "claymation",
+    "stop motion", "stop-motion", "3d animated", "cgi animation", "hoạt hình",
+    "disney", "dreamworks", "cel shaded", "cel-shaded", "toon",
+)
+ANIMATION_EXTRA_NEGATIVE = (
+    "human, person, people, realistic human, real person, man, woman, boy, girl, "
+    "photorealistic face, live action"
+)
+
 # interp = RIFE frame multiplier (1 = off). 8fps x 3 = 24fps cinematic output.
 MODE_PRESETS: dict[str, dict[str, Any]] = {
     "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False, "interp": 1},
@@ -102,6 +117,20 @@ def bool_arg(value: str | bool | None) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def is_animation_prompt(text: str) -> bool:
+    low = (text or "").lower()
+    return any(kw in low for kw in ANIMATION_KEYWORDS)
+
+
+def resolve_animation(mode: str, prompt: str) -> bool:
+    """mode is on/off/auto; auto detects animation keywords in the prompt."""
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return is_animation_prompt(prompt)
 
 
 def validate_image_path(raw_path: str) -> Path:
@@ -208,6 +237,7 @@ def patch_ltx_workflow(
     filename_prefix: str,
     env: dict[str, str],
     interp_multiplier: int = 1,
+    face_restore: bool = False,
 ) -> dict[str, Any]:
     patched = copy.deepcopy(workflow)
     checkpoint = cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT)
@@ -241,7 +271,6 @@ def patch_ltx_workflow(
     set_node_input(patched, "VAEDecodeTiled", "temporal_overlap", int(cfg(env, "LTX_VAE_TEMPORAL_OVERLAP", "8")))
     create_fps = float(fps)
     mult = int(interp_multiplier or 1)
-    face_restore = bool_arg(cfg(env, "LTX_FACE_RESTORE", "0"))
     if mult > 1 or face_restore:
         decode_id = next((nid for nid, _ in iter_nodes(patched, "VAEDecodeTiled")), None)
         create_id = next((nid for nid, _ in iter_nodes(patched, "CreateVideo")), None)
@@ -431,6 +460,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if not prompt:
         raise PipelineError("prompt is empty")
     negative = args.negative_prompt or cfg(env, "LTX_NEGATIVE_PROMPT", LTX_NEGATIVE_PROMPT)
+    animation = resolve_animation(getattr(args, "animation", "auto"), prompt)
+    if animation:
+        # Fix 3: block human/realistic drift (a vague shot rendering real people).
+        negative = f"{negative}, {ANIMATION_EXTRA_NEGATIVE}"
+    # Fix 2: CodeFormer is for real human faces; never run it on animation.
+    face_restore = bool_arg(cfg(env, "LTX_FACE_RESTORE", "0")) and not animation
+    if animation:
+        warnings.append("animation detected: CodeFormer face-restore disabled and human-blocking negatives added")
     patched = patch_ltx_workflow(
         workflow,
         image_name,
@@ -445,6 +482,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         f"hermes_ltx/{base}",
         env,
         interp_multiplier=settings["interp"],
+        face_restore=face_restore,
     )
     prompt_id = queue_comfy(comfy_url, patched, timeout=http_timeout)
     history = poll_comfy(comfy_url, prompt_id, poll_seconds, timeout_seconds, empty_queue_timeout_seconds)
@@ -469,6 +507,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "prompt_enhance": settings["prompt_enhance"],
             "interp_multiplier": settings["interp"],
             "output_fps": settings["output_fps"],
+            "animation": animation,
+            "face_restore": face_restore,
             "seed": seed,
         },
         "models": {
@@ -507,6 +547,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--keyframe-seed", dest="keyframe_seed", type=int, help="Fixed seed for keyframe generation (used when no --input-image is given). Helps keep characters consistent across shots in a sequence.")
     parser.add_argument("--validate-only", action="store_true", help="Validate ComfyUI nodes/models/settings without queueing a render")
+    parser.add_argument("--animation", choices=["auto", "on", "off"], default="auto",
+                        help="Animation/cartoon mode. on/off force it; auto (default) detects animation keywords in the prompt. When on, CodeFormer face-restore is skipped (it is for real human faces) and human-blocking negatives are added to stop realistic people drifting into cartoon shots.")
     return parser.parse_args(argv)
 
 

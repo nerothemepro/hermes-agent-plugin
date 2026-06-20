@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from generate_video import cfg, endpoint, http_json, load_env_file, slugify
+from generate_ltx_video import is_animation_prompt
 
 PROJECT_DIR = Path("/workspace/projects/media-pipeline")
 DEFAULT_ENV_FILE = "/opt/data/hermes/media-pipeline.env"
@@ -217,6 +218,13 @@ def render_shot(args: argparse.Namespace, prompt: str, index: int, total: int, i
     for cli_name, value in (("--width", args.width), ("--height", args.height), ("--fps", args.fps), ("--steps", args.steps), ("--interp-multiplier", args.interp_multiplier)):
         if value is not None:
             cmd.extend([cli_name, str(value)])
+    # Decide animation mode ONCE from the overall sequence prompt and force the
+    # same on/off on every shot, so a vaguely-worded middle shot can't silently
+    # flip to realistic humans / re-enable CodeFormer mid-sequence.
+    anim_mode = getattr(args, "animation", "auto")
+    if anim_mode == "auto":
+        anim_mode = "on" if is_animation_prompt(args.prompt) else "off"
+    cmd.extend(["--animation", anim_mode])
     # A fixed keyframe seed keeps the auto-generated keyframes visually
     # consistent across independent shots.
     if input_image is None and args.keyframe_seed is not None:
@@ -364,6 +372,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="Shared character/style description appended to every shot prompt so independent shots keep the same subjects (e.g. 'the same two original anime samurai, one in black robe, one in red robe, consistent faces, cinematic anime style').")
     parser.add_argument("--keyframe-seed", dest="keyframe_seed", type=int, default=None,
                         help="Fixed seed for per-shot keyframe generation, for extra cross-shot consistency.")
+    parser.add_argument("--animation", choices=["auto", "on", "off"], default="auto",
+                        help="Animation/cartoon mode applied uniformly to every shot. auto (default) detects animation keywords in the overall prompt. When on, CodeFormer face-restore is skipped and human-blocking negatives are added on each shot.")
     parser.add_argument("--input-image", dest="input_image", default="")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
