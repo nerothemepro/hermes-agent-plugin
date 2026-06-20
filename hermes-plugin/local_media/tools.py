@@ -82,10 +82,12 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
     "name": "generate_ltx_video_sequence",
     "description": (
         "Generate a LONG multi-shot LTX-2.3 video (roughly 10-75 seconds) by rendering several short shots "
-        "and stitching them into one mp4. This is the DEFAULT tool for ANY multi-shot or long video "
-        "(action sequences, cinematic scenes, realistic footage, 10-75 second videos) — i.e. whenever the "
-        "user wants a video longer than a single ~5s LTX clip — UNLESS the user explicitly asks for the "
-        "Wan2.1 pipeline. Each shot is rendered with the same engine as generate_ltx_video; by default the last frame "
+        "and stitching them into one mp4. This is the DEFAULT tool for ANY multi-shot or long video in EVERY "
+        "style — action sequences, cinematic scenes, realistic footage, AND animation / cartoon / 3D / Pixar "
+        "/ anime / children's videos — i.e. whenever the user wants a video longer than a single ~5s LTX clip. "
+        "ALWAYS use this tool for animation, cartoon and children's content; do NOT route those to the Wan2.1 "
+        "generate_video_sequence tool. Only skip this tool if the user explicitly names the Wan2.1 pipeline. "
+        "Each shot is rendered with the same engine as generate_ltx_video; by default the last frame "
         "of each shot becomes the first frame of the next shot so the action stays continuous. "
         "For the best long-form result, pass an explicit `shots` array where each item is the prompt for one "
         "consecutive ~5s beat of the action (e.g. 12 shots for a ~60s fight). If `shots` is omitted, the tool "
@@ -172,15 +174,15 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
 GENERATE_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
     "name": "generate_video_sequence",
     "description": (
-        "Generate a multi-shot local video through the user's ComfyUI + Wan2.1 FLF2V pipeline. "
-        "PREFER generate_ltx_video_sequence for general long / multi-shot / cinematic / realistic videos "
-        "(10-75s); use THIS Wan tool ONLY when the user explicitly asks for the Wan2.1 pipeline or its "
-        "anime_action FLF2V style. For anime action, "
-        "create original Japanese shonen anime sword-fight scenes with close-ups, dynamic camera "
-        "movement, readable choreography, elemental effects, and no copyrighted characters, text, "
-        "watermark, logo, or gore. Default duration is 20 seconds, default style_preset is "
-        "anime_action, default control_mode is FLF2V start/end keyframes, and default "
-        "postprocess is ffmpeg_fps at 16fps. The tool returns a MEDIA:/absolute/path directive."
+        "SPECIALIZED LEGACY tool for ORIGINAL JAPANESE SHONEN ANIME SWORD-FIGHT (samurai/katana) scenes ONLY, "
+        "via the user's ComfyUI + Wan2.1 FLF2V pipeline. ALWAYS use generate_ltx_video_sequence instead for "
+        "EVERY general request — including ALL animation, cartoon, 3D / Pixar, anime, children's, cinematic and "
+        "realistic videos. Use THIS Wan tool ONLY when the user EXPLICITLY names the Wan2.1 pipeline OR "
+        "explicitly asks for a samurai / katana sword-fight anime_action storyboard. WARNING: this tool OVERRIDES "
+        "the prompt's subject with a hardcoded two-samurai duel storyboard, so it must NEVER be used for "
+        "non-samurai content (e.g. a fox, a child, a product) — that content belongs in generate_ltx_video_sequence. "
+        "Default duration is 20 seconds, default style_preset is anime_action, default control_mode is FLF2V "
+        "start/end keyframes, default postprocess is ffmpeg_fps at 16fps. Returns a MEDIA:/absolute/path directive."
     ),
     "parameters": {
         "type": "object",

@@ -866,7 +866,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     env = load_env_file(DEFAULT_ENV_FILE)
     duration = coerce_duration(int(args.duration_seconds))
     mode = args.mode
-    style_preset = args.style_preset or ('anime_action' if args.style in {'original_japanese_anime_action', 'anime_action', ''} else 'default')
+    # Only treat a shot batch as the samurai anime_action storyboard when the
+    # caller EXPLICITLY asks for it. An empty/unspecified style must fall back to
+    # the generic 'default' storyboard that respects the user's own prompt —
+    # otherwise children's / cartoon / Pixar requests get hijacked into the
+    # hardcoded "two samurai" template (see build_storyboard).
+    style_preset = args.style_preset or ('anime_action' if args.style in {'original_japanese_anime_action', 'anime_action'} else 'default')
     motion_profile = str(args.motion_profile or 'balanced').strip().lower()
     keyframe_quality_preset = str(args.keyframe_quality_preset or 'flux_default').strip().lower()
     shot_prompt_strength = str(args.shot_prompt_strength or 'balanced').strip().lower()
