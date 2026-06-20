@@ -24,6 +24,7 @@ from generate_video import (
     endpoint,
     find_output_ref,
     http_json,
+    iter_nodes,
     load_env_file,
     load_workflow,
     object_options,
@@ -42,6 +43,12 @@ DEFAULT_IMAGE_DIR = "/opt/data/hermes/generated-images"
 DEFAULT_VIDEO_DIR = "/opt/data/hermes/generated-videos"
 DEFAULT_KEYFRAME_SCRIPT = str(PROJECT_DIR / "generate_video.py")
 
+# Realistic keyframe is rendered larger than the LTX output (AR-matched 1.5:1)
+# so faces retain detail after downscale into the I2V input. Both divisible by 64.
+KEYFRAME_WIDTH = 1152
+KEYFRAME_HEIGHT = 768
+KEYFRAME_FLUX_STEPS = 28
+
 LTX_CHECKPOINT = "ltx-2.3-22b-dev-fp8.safetensors"
 LTX_DISTILLED_LORA = "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors"
 LTX_GEMMA_LORA = "gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors"
@@ -52,13 +59,34 @@ LTX_NEGATIVE_PROMPT = (
     "distorted motion, warped hands, deformed face, flicker, bad anatomy"
 )
 
+# RIFE frame interpolation: LTX renders natively at low fps (8) to fit the 3090
+# VRAM envelope; a post-decode RIFE pass multiplies frames so motion looks smooth
+# and faces read sharper during action without re-rendering. Runs in-graph after
+# VAE decode, so the proven render resolution/fps is unchanged (no OOM risk).
+DEFAULT_INTERP_MODEL = "rife_v4.26.safetensors"
+
+# Tier 2 face restoration (CodeFormer). RIFE smooths motion but cannot un-blur an
+# already-smeared frame; CodeFormer reconstructs facial detail per-frame. Runs
+# in-graph right after VAE decode (before RIFE, so fewer frames are restored and
+# RIFE dampens per-frame identity flicker). Requires the facerestore_cf custom
+# node + codeformer model in the ComfyUI container; gated OFF by default via the
+# LTX_FACE_RESTORE env so renders never break when the node is absent.
+DEFAULT_FACE_RESTORE_MODEL = "codeformer.pth"
+DEFAULT_FACE_DETECTION = "retinaface_resnet50"
+# CodeFormer fidelity: 0=max restoration (sharper, may drift identity),
+# 1=max fidelity to input. 0.5 balances sharpness vs identity for video.
+DEFAULT_FACE_FIDELITY = 0.5
+FACE_RESTORE_LOADER_CLASS = "FaceRestoreModelLoader"
+FACE_RESTORE_CLASS = "FaceRestoreCFWithModel"
+
+# interp = RIFE frame multiplier (1 = off). 8fps x 3 = 24fps cinematic output.
 MODE_PRESETS: dict[str, dict[str, Any]] = {
-    "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False},
-    "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False},
+    "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False, "interp": 1},
+    "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False, "interp": 3},
     # quality envelope proven on RTX 3090: 768x512, 41 frames (5s@8fps), 20 steps
     # completes in ~254s/shot with no OOM. Higher fps at 5s raises frame count and
-    # VRAM, so quality stays at 8fps natively (smooth via post-interpolation later).
-    "quality": {"width": 768, "height": 512, "duration": 5, "fps": 8, "steps": 20, "prompt_enhance": False},
+    # VRAM, so quality stays at 8fps natively, then RIFE x3 -> 24fps in post.
+    "quality": {"width": 768, "height": 512, "duration": 5, "fps": 8, "steps": 20, "prompt_enhance": False, "interp": 3},
 }
 
 
@@ -105,6 +133,15 @@ def run_keyframe_generator(args: argparse.Namespace, env: dict[str, str], base: 
     ]
     if args.style == "anime":
         cmd.extend(["--keyframe-frame-mode", "single_scene"])
+    else:
+        # Render the realistic keyframe larger than the LTX output (AR-matched
+        # 1.5) so faces get ~2x the pixels and stay sharp after downscale; bump
+        # Flux steps for finer facial detail. Anime/animagine keeps its own path.
+        cmd.extend([
+            "--keyframe-width", str(KEYFRAME_WIDTH),
+            "--keyframe-height", str(KEYFRAME_HEIGHT),
+            "--flux-steps", str(KEYFRAME_FLUX_STEPS),
+        ])
     if getattr(args, "keyframe_seed", None) is not None:
         cmd.extend(["--seed", str(args.keyframe_seed)])
     if Path(args.env_file).exists():
@@ -170,6 +207,7 @@ def patch_ltx_workflow(
     seed: int,
     filename_prefix: str,
     env: dict[str, str],
+    interp_multiplier: int = 1,
 ) -> dict[str, Any]:
     patched = copy.deepcopy(workflow)
     checkpoint = cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT)
@@ -201,7 +239,50 @@ def patch_ltx_workflow(
     set_node_input(patched, "VAEDecodeTiled", "overlap", int(cfg(env, "LTX_VAE_OVERLAP", "64")))
     set_node_input(patched, "VAEDecodeTiled", "temporal_size", int(cfg(env, "LTX_VAE_TEMPORAL_SIZE", "32")))
     set_node_input(patched, "VAEDecodeTiled", "temporal_overlap", int(cfg(env, "LTX_VAE_TEMPORAL_OVERLAP", "8")))
-    set_node_input(patched, "CreateVideo", "fps", float(fps))
+    create_fps = float(fps)
+    mult = int(interp_multiplier or 1)
+    face_restore = bool_arg(cfg(env, "LTX_FACE_RESTORE", "0"))
+    if mult > 1 or face_restore:
+        decode_id = next((nid for nid, _ in iter_nodes(patched, "VAEDecodeTiled")), None)
+        create_id = next((nid for nid, _ in iter_nodes(patched, "CreateVideo")), None)
+        if decode_id is None or create_id is None:
+            raise PipelineError("LTX workflow missing VAEDecodeTiled/CreateVideo; cannot add post-decode nodes")
+        # frames_source walks the post-decode chain: decode -> [face restore] ->
+        # [RIFE] -> CreateVideo. Each enabled stage consumes the previous output.
+        frames_source = decode_id
+        if face_restore:
+            # Tier 2: per-frame CodeFormer face restoration (before RIFE so fewer
+            # frames are processed and interpolation softens identity flicker).
+            fr_loader_id, fr_id = "face_restore_loader", "face_restore"
+            patched[fr_loader_id] = {
+                "class_type": FACE_RESTORE_LOADER_CLASS,
+                "inputs": {"model_name": cfg(env, "LTX_FACE_RESTORE_MODEL", DEFAULT_FACE_RESTORE_MODEL)},
+            }
+            patched[fr_id] = {
+                "class_type": FACE_RESTORE_CLASS,
+                "inputs": {
+                    "facerestore_model": [fr_loader_id, 0],
+                    "image": [frames_source, 0],
+                    "facedetection": cfg(env, "LTX_FACE_DETECTION", DEFAULT_FACE_DETECTION),
+                    "codeformer_fidelity": float(cfg(env, "LTX_FACE_FIDELITY", str(DEFAULT_FACE_FIDELITY))),
+                },
+            }
+            frames_source = fr_id
+        if mult > 1:
+            loader_id, interp_id = "rife_loader", "rife_interp"
+            patched[loader_id] = {
+                "class_type": "FrameInterpolationModelLoader",
+                "inputs": {"model_name": cfg(env, "LTX_INTERP_MODEL", DEFAULT_INTERP_MODEL)},
+            }
+            patched[interp_id] = {
+                "class_type": "FrameInterpolate",
+                "inputs": {"interp_model": [loader_id, 0], "images": [frames_source, 0], "multiplier": mult},
+            }
+            frames_source = interp_id
+            create_fps = float(fps) * mult
+        # Feed the final post-decode stage into CreateVideo.
+        patched[create_id].setdefault("inputs", {})["images"] = [frames_source, 0]
+    set_node_input(patched, "CreateVideo", "fps", create_fps)
     set_node_input(patched, "SaveVideo", "filename_prefix", filename_prefix)
     set_node_input(patched, "SaveVideo", "format", "mp4")
     set_node_input(patched, "SaveVideo", "codec", "h264")
@@ -222,7 +303,53 @@ def resolve_settings(args: argparse.Namespace) -> dict[str, Any]:
     preset["fps"] = max(8, min(24, int(preset["fps"])))
     preset["steps"] = max(1, min(30, int(preset["steps"])))
     preset["frames"] = frame_count(preset["duration"], preset["fps"])
+    interp = getattr(args, "interp_multiplier", None)
+    if interp is None:
+        interp = preset.get("interp", 1)
+    preset["interp"] = max(1, min(8, int(interp)))
+    preset["output_fps"] = preset["fps"] * preset["interp"]
     return preset
+
+
+def eject_llm_vram(env: dict[str, str], comfy_url: str, http_timeout: int) -> list[str]:
+    """Free the GPU of any resident LLM before rendering.
+
+    The single 24GB RTX 3090 cannot hold the orchestrator LLM (LM Studio) and
+    the LTX-2.3 22B render at the same time, so every loaded LM Studio model is
+    unloaded here to reclaim VRAM. The gateway JIT-reloads its model on the next
+    chat call once the render returns. Best-effort: a render must NEVER fail
+    because the eject could not run. Controlled by env LTX_AUTO_EJECT_LLM (on by
+    default); LM Studio location from LM_STUDIO_BASE_URL.
+    """
+    if not bool_arg(cfg(env, "LTX_AUTO_EJECT_LLM", "1")):
+        return []
+    base = cfg(env, "LM_STUDIO_BASE_URL", "http://host.docker.internal:1234")
+    timeout = min(http_timeout, 15)
+    ejected: list[str] = []
+    try:
+        info = http_json("GET", endpoint(base, "/api/v1/models"), timeout=min(http_timeout, 10))
+    except Exception as exc:  # LM Studio down / unreachable -> nothing to eject
+        print(f"[eject-llm] LM Studio query failed ({type(exc).__name__}); skipping eject", file=sys.stderr)
+        info = None
+    for model in (info.get("models", []) if isinstance(info, dict) else []):
+        for inst in (model.get("loaded_instances") or []):
+            iid = inst.get("id") if isinstance(inst, dict) else inst
+            if not iid:
+                continue
+            try:
+                http_json("POST", endpoint(base, "/api/v1/models/unload"), {"instance_id": iid}, timeout=timeout)
+                ejected.append(iid)
+            except Exception as exc:
+                print(f"[eject-llm] failed to unload {iid} ({type(exc).__name__})", file=sys.stderr)
+    # Also drop any models ComfyUI cached so the render starts on a clean GPU.
+    try:
+        http_json("POST", endpoint(comfy_url, "/free"), {"unload_models": True, "free_memory": True}, timeout=timeout)
+    except Exception:
+        pass
+    if ejected:
+        print(f"[eject-llm] freed VRAM by unloading {len(ejected)} LM Studio model(s): {', '.join(ejected)}", file=sys.stderr)
+        time.sleep(2)  # let the driver reclaim VRAM before the keyframe load
+    return ejected
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -274,6 +401,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "errors": [],
         }
 
+    # Free the GPU of the orchestrator LLM before ANY GPU work (keyframe + LTX).
+    # On the single 24GB 3090 a resident LM Studio model + LTX-22B = OOM, which
+    # is exactly why the gateway render previously stalled with no video.
+    ejected_models = eject_llm_vram(env, comfy_url, http_timeout)
+    if ejected_models:
+        warnings.append(f"ejected {len(ejected_models)} LM Studio model(s) from VRAM before render: {', '.join(ejected_models)}")
+
     if args.input_image:
         input_image = str(validate_image_path(args.input_image))
         keyframe_generated = False
@@ -310,6 +444,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         seed,
         f"hermes_ltx/{base}",
         env,
+        interp_multiplier=settings["interp"],
     )
     prompt_id = queue_comfy(comfy_url, patched, timeout=http_timeout)
     history = poll_comfy(comfy_url, prompt_id, poll_seconds, timeout_seconds, empty_queue_timeout_seconds)
@@ -332,6 +467,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "frames": settings["frames"],
             "steps": settings["steps"],
             "prompt_enhance": settings["prompt_enhance"],
+            "interp_multiplier": settings["interp"],
+            "output_fps": settings["output_fps"],
             "seed": seed,
         },
         "models": {
@@ -359,6 +496,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--duration", type=int)
     parser.add_argument("--fps", type=int)
     parser.add_argument("--steps", type=int)
+    parser.add_argument("--interp-multiplier", dest="interp_multiplier", type=int, default=None,
+                        help="RIFE frame interpolation multiplier (1=off). Multiplies decoded frames so 8fps motion plays smoothly (e.g. 3 -> 24fps). Defaults per mode preset.")
     parser.add_argument("--prompt-enhance", dest="prompt_enhance")
     parser.add_argument("--negative-prompt", default="")
     parser.add_argument("--timeout-seconds", type=int, default=1800)

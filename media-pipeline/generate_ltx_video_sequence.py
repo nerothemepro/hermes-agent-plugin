@@ -214,7 +214,7 @@ def render_shot(args: argparse.Namespace, prompt: str, index: int, total: int, i
         "--env-file", args.env_file,
         "--timeout-seconds", str(args.per_shot_timeout_seconds),
     ]
-    for cli_name, value in (("--width", args.width), ("--height", args.height), ("--fps", args.fps), ("--steps", args.steps)):
+    for cli_name, value in (("--width", args.width), ("--height", args.height), ("--fps", args.fps), ("--steps", args.steps), ("--interp-multiplier", args.interp_multiplier)):
         if value is not None:
             cmd.extend([cli_name, str(value)])
     # A fixed keyframe seed keeps the auto-generated keyframes visually
@@ -369,6 +369,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--height", type=int)
     parser.add_argument("--fps", type=int)
     parser.add_argument("--steps", type=int)
+    parser.add_argument("--interp-multiplier", dest="interp_multiplier", type=int, default=None,
+                        help="RIFE frame interpolation multiplier passed to each shot (1=off). Defaults per mode preset (quality -> x3 = 24fps).")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--per-shot-timeout-seconds", dest="per_shot_timeout_seconds", type=int, default=1200)
     parser.add_argument("--output-dir", dest="output_dir", default=DEFAULT_VIDEO_DIR)

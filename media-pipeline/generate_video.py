@@ -245,6 +245,7 @@ def prompt_to_english(
     return (
         f"{scene}, cinematic keyframe, photorealistic, dynamic composition, "
         "dramatic natural lighting, sharp subject, detailed environment, 35mm lens, "
+        "detailed facial features, sharp eyes, natural skin texture, fine detail, "
         "high quality, no text, no watermark"
     )
 
@@ -265,7 +266,13 @@ def prompt_to_video_prompt_for_style(image_prompt: str, style_preset: str) -> st
 def negative_prompt_for_style(env: dict[str, str], style_preset: str) -> str:
     if style_preset == "anime_action":
         return cfg(env, "ANIME_ACTION_NEGATIVE_PROMPT", ANIME_ACTION_NEGATIVE_PROMPT)
-    return cfg(env, "NEGATIVE_PROMPT", "text, watermark, logo, blurry, low quality, distorted motion")
+    return cfg(
+        env,
+        "NEGATIVE_PROMPT",
+        "text, watermark, logo, blurry, low quality, distorted motion, "
+        "deformed face, disfigured, asymmetric eyes, bad eyes, ugly face, "
+        "plastic skin, waxy skin, extra fingers, mutated hands",
+    )
 
 
 def note_has_concrete_visual_traits(note: str) -> bool:
@@ -935,6 +942,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     keyframe_cfg = float(cfg(env, "ANIMAGINE_CFG", "6.0")) if keyframe_engine == "animagine" else 1.0
     width = int(mode_settings["width"])
     height = int(mode_settings["height"])
+    # Allow callers (e.g. the LTX pipeline) to render the Flux keyframe at a
+    # higher resolution than the downstream video so faces get more pixels.
+    # Only honored in keyframe-only mode so the Wan I2V path is unaffected.
+    if args.keyframe_only and int(getattr(args, "keyframe_width", 0) or 0) > 0 and int(getattr(args, "keyframe_height", 0) or 0) > 0:
+        width = int(args.keyframe_width)
+        height = int(args.keyframe_height)
 
     def prompt_manifest() -> dict[str, str]:
         return {"image": prompt_used, "video": video_prompt, "negative": negative}
@@ -1238,6 +1251,8 @@ def main() -> int:
     parser.add_argument("--frames", type=int, default=0, help="Override Wan frame count for this shot.")
     parser.add_argument("--wan-steps", type=int, default=0, help="Override Wan KSampler steps for this shot.")
     parser.add_argument("--flux-steps", type=int, default=0, help="Override Flux keyframe KSampler steps.")
+    parser.add_argument("--keyframe-width", type=int, default=0, help="Override keyframe-only render width (e.g. higher-res keyframe for the LTX pipeline). Ignored unless --keyframe-only.")
+    parser.add_argument("--keyframe-height", type=int, default=0, help="Override keyframe-only render height. Ignored unless --keyframe-only.")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
     try:
