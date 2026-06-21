@@ -118,8 +118,8 @@ GENERATE_LTX_VIDEO_SEQUENCE_SCHEMA: dict[str, Any] = {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 5,
-                "default": 5,
-                "description": "Length of each individual shot in seconds. Capped at 5 by the single-shot LTX engine.",
+                "default": 3,
+                "description": "Length of each individual shot in seconds (capped at 5 by the single-shot LTX engine). Default 3: shorter shots keep faces sharp because each shot is anchored to one keyframe and the face softens/morphs late in a long take. Only raise toward 5 for slow, near-static shots.",
             },
             "continuity": {
                 "type": "string",
@@ -542,7 +542,7 @@ def handle_generate_ltx_video_sequence(args: dict[str, Any], **kw) -> str:
     seed = _coerce_optional_seed(args.get("seed"))
     keyframe_seed = _coerce_optional_seed(args.get("keyframe_seed"))
     total_duration = _coerce_ltx_optional_int(args.get("total_duration_seconds"), 6, 90) or 60
-    shot_duration = _coerce_ltx_optional_int(args.get("shot_duration_seconds"), 1, 5) or 5
+    shot_duration = _coerce_ltx_optional_int(args.get("shot_duration_seconds"), 1, 5) or 3
 
     shots = args.get("shots")
     shots_file: Path | None = None

@@ -98,10 +98,12 @@ ANIMATION_EXTRA_NEGATIVE = (
 MODE_PRESETS: dict[str, dict[str, Any]] = {
     "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False, "interp": 1},
     "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False, "interp": 3},
-    # quality envelope proven on RTX 3090: 768x512, 41 frames (5s@8fps), 20 steps
-    # completes in ~254s/shot with no OOM. Higher fps at 5s raises frame count and
-    # VRAM, so quality stays at 8fps natively, then RIFE x3 -> 24fps in post.
-    "quality": {"width": 768, "height": 512, "duration": 5, "fps": 8, "steps": 20, "prompt_enhance": False, "interp": 3},
+    # quality envelope proven on RTX 3090: 768x512 @ 8fps native, then RIFE x3 ->
+    # 24fps in post. Steps raised 20->26 for sharper in-motion facial detail.
+    # Single-shot keeps 5s; the sequence controller uses 3s shots (see its
+    # --shot-duration-seconds default) to limit per-shot keyframe drift, which is
+    # what softens/morphs faces late in a long single-anchor shot.
+    "quality": {"width": 768, "height": 512, "duration": 5, "fps": 8, "steps": 26, "prompt_enhance": False, "interp": 3},
 }
 
 

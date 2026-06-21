@@ -362,7 +362,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--shots", default="", help="Inline JSON array of per-shot prompt strings")
     parser.add_argument("--shots-file", dest="shots_file", default="", help="Path to JSON file with an array of per-shot prompt strings")
     parser.add_argument("--total-duration-seconds", dest="total_duration_seconds", type=int, default=60)
-    parser.add_argument("--shot-duration-seconds", dest="shot_duration_seconds", type=int, default=5)
+    # 3s default: shorter shots limit per-shot keyframe drift (faces stay sharp;
+    # a single-anchor I2V shot softens/morphs the face late in a long 5s take).
+    parser.add_argument("--shot-duration-seconds", dest="shot_duration_seconds", type=int, default=3)
     parser.add_argument("--mode", choices=["test", "standard", "quality"], default="standard")
     parser.add_argument("--style", choices=["realistic", "product", "travel", "social_ad", "anime"], default="realistic")
     parser.add_argument("--keyframe-engine", dest="keyframe_engine", choices=["auto", "flux", "animagine"], default="auto")
