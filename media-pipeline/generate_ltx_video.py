@@ -157,12 +157,17 @@ def run_keyframe_generator(args: argparse.Namespace, env: dict[str, str], base: 
         "--mode",
         mode,
         "--style-preset",
-        "anime_action" if args.style == "anime" else "default",
+        # animation=True means Pixar/cartoon/3D-animated content — always use
+        # Flux (style-preset=default) regardless of args.style. style=anime
+        # would otherwise trigger animagine which generates 2D anime characters
+        # (e.g. samurai) even for a bear-cub-in-forest prompt.
+        "default" if getattr(args, "animation", False) else ("anime_action" if args.style == "anime" else "default"),
         "--keyframe-engine",
         args.keyframe_engine,
         "--keyframe-only",
     ]
-    if args.style == "anime":
+    use_animagine_path = args.style == "anime" and not getattr(args, "animation", False)
+    if use_animagine_path:
         cmd.extend(["--keyframe-frame-mode", "single_scene"])
     else:
         # Render the realistic keyframe larger than the LTX output (AR-matched
