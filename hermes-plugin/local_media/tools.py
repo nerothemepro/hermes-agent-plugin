@@ -8,9 +8,12 @@ inside /opt/data/hermes/generated-videos before handing the path back to Hermes.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +27,55 @@ DEFAULT_ENV_FILE = Path("/opt/data/hermes/media-pipeline.env")
 DEFAULT_VIDEO_DIR = Path("/opt/data/hermes/generated-videos")
 SMOKE_IMAGE = Path("/workspace/projects/media-pipeline/test_assets/wan_i2v_smoke_input.png")
 ALLOWED_VIDEO_DIRS = (DEFAULT_VIDEO_DIR.resolve(),)
+ORCHESTRATOR_URL = os.environ.get("HVP_ORCHESTRATOR_URL", "http://localhost:8501")
+
+
+GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
+    "name": "generate_hervid_video",
+    "description": (
+        "PRIMARY tool for ALL video generation requests — animation, Pixar/3D, realistic, travel, "
+        "product, social, children's content. Pass the raw user brief in ANY language (Vietnamese, "
+        "English, etc.) and the pipeline handles everything automatically: parses the brief via LM "
+        "Studio → generates creative JSON → renders multi-shot LTX-2.3 video → returns the final "
+        "mp4 path. Mechanical parameters (style=realistic, keyframe_engine=flux, "
+        "continuity=independent) are forced server-side — you cannot mis-route them. "
+        "Use this tool FIRST for every video request. Only fall back to "
+        "generate_ltx_video_sequence if the user needs explicit per-shot control or the "
+        "orchestrator service is unreachable."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "brief": {
+                "type": "string",
+                "description": (
+                    "The user's video request, passed verbatim in whatever language they used. "
+                    "The orchestrator's LM Studio step parses and translates it internally. "
+                    "Example: 'làm video về chú gấu Pixar dễ thương vui chơi trong rừng'."
+                ),
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "standard", "quality"],
+                "default": "quality",
+                "description": (
+                    "Render quality: test=fast smoke check (2 shots, ~15 min); "
+                    "standard=balanced; quality=best (recommended for real user videos). "
+                    "Use test only for plumbing checks."
+                ),
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "default": 7200,
+                "minimum": 300,
+                "maximum": 14400,
+                "description": "Max wait time. A 30s quality video takes 30-60 min on RTX 3090.",
+            },
+        },
+        "required": ["brief"],
+        "additionalProperties": False,
+    },
+}
 
 
 GENERATE_LTX_VIDEO_SCHEMA: dict[str, Any] = {
@@ -442,6 +494,87 @@ def _coerce_ltx_optional_int(value: Any, low: int, high: int) -> int | None:
     except Exception:
         return None
     return max(low, min(high, number))
+
+
+def handle_generate_hervid_video(args: dict[str, Any], **kw) -> str:
+    brief = str(args.get("brief") or "").strip()
+    if not brief:
+        return tool_error("brief is required")
+
+    mode = str(args.get("mode") or "quality").strip().lower()
+    if mode not in {"test", "standard", "quality"}:
+        mode = "quality"
+    timeout = _coerce_seq_timeout(args.get("timeout_seconds"))
+
+    # Submit to orchestrator
+    body = json.dumps({"brief": brief, "mode": mode}).encode()
+    req = urllib.request.Request(
+        f"{ORCHESTRATOR_URL}/generate-video",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            resp = json.loads(r.read())
+    except Exception as exc:
+        return tool_error(
+            f"generate_hervid_video: orchestrator unreachable at {ORCHESTRATOR_URL} — {exc}. "
+            "Ensure start-services.sh has been run."
+        )
+
+    job_id = resp.get("id")
+    if not job_id:
+        return tool_error(f"generate_hervid_video: orchestrator returned no job id: {resp}")
+
+    # Poll until completed or failed
+    deadline = time.time() + timeout
+    last_status = None
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"{ORCHESTRATOR_URL}/pipeline-job/{job_id}", timeout=15
+            ) as r:
+                job = json.loads(r.read())
+        except Exception:
+            time.sleep(30)
+            continue
+
+        status = job.get("status")
+        last_status = status
+
+        if status == "completed":
+            video_path = job.get("final_video_path")
+            try:
+                verified, size = _verify_video_path(video_path)
+            except Exception as exc:
+                return tool_error(f"generate_hervid_video completed but video invalid: {exc}")
+            creative = job.get("creative") or {}
+            return tool_result({
+                "success": True,
+                "status": "completed",
+                "video_path": str(verified),
+                "media": f"MEDIA:{verified}",
+                "send_to_user": f"MEDIA:{verified}",
+                "size_bytes": size,
+                "runtime_seconds": job.get("runtime_seconds"),
+                "prompt_used": creative.get("prompt"),
+                "character_note": creative.get("character_note"),
+                "duration_seconds": creative.get("total_duration_seconds"),
+                "note": "Send the media field verbatim to deliver the video on Telegram.",
+            })
+
+        if status == "failed":
+            errors = job.get("errors") or []
+            logs = job.get("logs") or []
+            detail = "; ".join(errors) or (logs[-1] if logs else "unknown error")
+            return tool_error(f"generate_hervid_video failed: {detail}")
+
+        time.sleep(30)
+
+    return tool_error(
+        f"generate_hervid_video timed out after {timeout}s (job {job_id} still {last_status})"
+    )
 
 
 def handle_generate_ltx_video(args: dict[str, Any], **kw) -> str:
