@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+'use strict';
+
+const { DEFAULT_WIKI_ROOT, resolveLatestRawInbox } = require('../src/herWikiIngestLatestRawInbox');
+
+function parseArgs(argv) {
+  const args = { wikiRoot: null, inboxDir: null, includeProblematic: false, help: false };
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--wiki-root' && argv[i + 1]) {
+      args.wikiRoot = argv[++i];
+    } else if (arg === '--inbox-dir' && argv[i + 1]) {
+      args.inboxDir = argv[++i];
+    } else if (arg === '--include-problematic') {
+      args.includeProblematic = true;
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return args;
+}
+
+function printUsage() {
+  console.log(`
+HerWiki Ingest Latest Raw Inbox
+===============================
+
+Resolve the newest markdown file from raw/inbox and print a ready-to-use HerWiki ingest prompt.
+
+Usage:
+  herwiki-ingest-latest-raw-inbox
+  herwiki-ingest-latest-raw-inbox --wiki-root ${DEFAULT_WIKI_ROOT}
+  herwiki-ingest-latest-raw-inbox --inbox-dir /custom/raw/inbox
+  herwiki-ingest-latest-raw-inbox --include-problematic
+
+Output: JSON with latest_raw_path and prompt_for_herwiki.
+`.trim());
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+  if (args.help) {
+    printUsage();
+    return;
+  }
+
+  const result = resolveLatestRawInbox({
+    wikiRoot: args.wikiRoot,
+    inboxDir: args.inboxDir,
+    includeProblematic: args.includeProblematic,
+  });
+
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+main();
