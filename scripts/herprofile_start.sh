@@ -15,6 +15,17 @@ LOG_FILE="$LOG_DIR/gateway.log"
 
 mkdir -p "$LOG_DIR"
 
+# Export profile-specific environment variables for tools/providers that read
+# directly from os.environ, such as Browser Use, Browserbase, Firecrawl, and
+# platform tokens. Hermes also reads .env internally, but browser providers need
+# these variables in the process environment.
+if [[ -f "$HERMES_HOME/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$HERMES_HOME/.env"
+  set +a
+fi
+
 cd "$HERMES_SRC"
 setsid -f nohup env HERMES_HOME="$HERMES_HOME" LM_API_KEY="${LM_API_KEY:-lm-studio}" "$HERMES_BIN" gateway run >> "$LOG_FILE" 2>&1 &
 
