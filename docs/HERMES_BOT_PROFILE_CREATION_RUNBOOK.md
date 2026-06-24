@@ -8,6 +8,7 @@ Use it when creating profiles like:
 - `herresearch`: research/browser/search
 - `herdev`: coding/SDTK/dev work
 - `hertran`: translation and Japanese PM communication
+- `herwiki`: wiki / second brain maintenance
 
 The core rule is: each bot profile must have its own `HERMES_HOME`, config, sessions, memory, logs, and Telegram bot token.
 
@@ -35,6 +36,7 @@ Recommended profile split:
 | `herresearch` | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `web`, `cronjob`, `memory`, `terminal`, MCP browser if needed |
 | `herdev` | `qwen/qwen3.6-27b` | `clarify`, `messaging`, `terminal`, file/search/dev tools |
 | `hertran` | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `memory` |
+| `herwiki` | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `terminal`, `file`, `search` |
 
 ## 2. Create Telegram Bot Token
 
@@ -202,6 +204,18 @@ EOF"
 ```
 
 For profile-specific prompts, save a copy in this repo under `docs/` so the profile can be rebuilt later.
+
+For a wiki profile, use the source copy:
+
+```text
+/workspace/hermes-agent-plugin/docs/HERWIKI_SOUL.md
+```
+
+This profile must point at the wiki root and follow the wiki repository contract in:
+
+```text
+/workspace/sdtk-wiki/ai-agent-second-brain-main/CLAUDE.md
+```
 
 Example existing file:
 

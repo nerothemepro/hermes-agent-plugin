@@ -45,6 +45,12 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/HERTRAN_SOUL.md`  
   Concise persona/behavior layer for HerTran.
 
+- `docs/HERWIKI_PROFILE.md`  
+  HerWiki profile notes for maintaining Nero's markdown-first personal wiki at `/workspace/sdtk-wiki/ai-agent-second-brain-main`.
+
+- `docs/HERWIKI_SOUL.md`  
+  Runtime persona/behavior layer for HerWiki. It requires reading the wiki `CLAUDE.md` contract before real wiki work.
+
 ## GenVideo / HerVid Docs
 
 - `docs/HERMES_GENVIDEO_RUNBOOK.md`  

@@ -19,6 +19,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 /opt/data/hermes-profiles/herresearch
 /opt/data/hermes-profiles/herdev
 /opt/data/hermes-profiles/hertran
+/opt/data/hermes-profiles/herwiki
 ```
 
 ## Profile Roles
@@ -29,6 +30,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 | `herresearch` | Research, synthesize reports, cron/news briefing | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `web`, `cronjob`, `memory` |
 | `herdev` | Coding/dev work with SDTK and local repos | `qwen/qwen3.6-27b` | `clarify`, `messaging`, `terminal`, `file`, `search` |
 | `hertran` | Translation and PM communication drafting for Japanese/English/Vietnamese email, Slack, and Teams messages | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `memory` |
+| `herwiki` | Maintain Nero's markdown-first personal wiki / second brain | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `terminal`, `file`, `search` |
 
 ## External Services
 
@@ -75,6 +77,7 @@ docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scr
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh herresearch"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh herdev"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh hertran"
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh herwiki"
 ```
 
 Stop all profiles:
@@ -84,6 +87,7 @@ docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scr
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh herresearch"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh herdev"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh hertran"
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_stop.sh herwiki"
 ```
 
 Restart one profile:
@@ -98,6 +102,7 @@ Check status:
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_status.sh hervid"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_status.sh herresearch"
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_status.sh herdev"
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofile_status.sh herwiki"
 ```
 
 ## Verify Process and Gateway State
