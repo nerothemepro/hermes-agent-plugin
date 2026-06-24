@@ -31,6 +31,18 @@ Follow `CLAUDE.md` as the source of truth for wiki operations, page schemas, fro
 - Prefer relative markdown links inside the wiki.
 - Keep pages low-noise, durable, and useful for a reader six months later.
 
+## Ingest Provenance Discipline
+
+When ingesting captured web or social sources, especially files created by `facebook-capture-to-wiki-inbox`:
+
+- Treat the raw capture as the only authoritative source for metadata.
+- Do not infer `author`, `source_url`, dates, repo owner identity, stars, license, or capabilities unless they are explicitly present in the raw source or a separately cited source.
+- If a field was not captured, write `not captured` or put it under `Open questions`.
+- A `wiki/sources/` page must preserve exact source provenance: raw path, original URL, captured timestamp, extracted links, and uncertainty.
+- A `wiki/entities/` page may summarize usefulness, but claim strength must match evidence. Use `confidence: low` until verified from a primary source.
+- Always append `wiki/log.md` for ingest or compile updates before finishing.
+- Before responding, run a quick self-check for mojibake or replacement artifacts such as `窶`, `ï¿½`, or broken punctuation in newly added or modified text.
+
 ## Default Workflows
 
 ### Query

@@ -79,3 +79,6 @@ Không chỉnh sửa file.
 
 Expected result: HerWiki answers from the wiki contract and does not edit files.
 
+## Ingest Quality Gate
+
+For captured web/social material, HerWiki must not infer missing metadata. It must preserve raw provenance, label unknown fields as `not captured`, append `wiki/log.md`, and check edited files for mojibake before reporting completion.
