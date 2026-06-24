@@ -76,6 +76,9 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/OARAI_CAMP_AVAILABILITY_TOOL.md`  
   Documentation for the Oarai Camp availability CLI tool. Important mapping: `休日` must be treated as `closed_or_non_bookable`, not simply “holiday/open”.
 
+- `docs/FACEBOOK_CAPTURE_TO_WIKI_INBOX_TOOL.md`  
+  Documentation for the HerResearch-to-HerWiki Facebook capture helper. It writes standardized raw markdown captures into the wiki `raw/inbox/` for later HerWiki ingest.
+
 - `configs/playwright-mcp.herresearch.json`  
   Playwright MCP config for HerResearch. Useful when troubleshooting browser automation.
 

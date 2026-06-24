@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const { writeFacebookCapture, DEFAULT_WIKI_ROOT } = require('../src/facebookCaptureToWikiInbox');
+
+function parseArgs(argv) {
+  const args = { wikiRoot: null, input: null, help: false };
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--input' && argv[i + 1]) {
+      const val = argv[++i];
+      args.input = val.trim().startsWith('{')
+        ? JSON.parse(val)
+        : JSON.parse(fs.readFileSync(val, 'utf-8'));
+    } else if (arg === '--wiki-root' && argv[i + 1]) {
+      args.wikiRoot = argv[++i];
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return args;
+}
+
+function printUsage() {
+  console.log(`
+Facebook Capture To Wiki Inbox
+==============================
+
+Create a raw markdown capture under the personal wiki raw/inbox directory.
+This tool does not ingest or edit wiki/ pages.
+
+Usage:
+  facebook-capture-to-wiki-inbox --input '{...}'
+  facebook-capture-to-wiki-inbox --input /path/to/capture.json
+  facebook-capture-to-wiki-inbox --input '{...}' --wiki-root ${DEFAULT_WIKI_ROOT}
+
+Input JSON schema:
+{
+  "source_url": "https://www.facebook.com/groups/.../permalink/...",
+  "title": "Browser page title",
+  "heading": "Main heading",
+  "group": "AI Everyday",
+  "author": "optional",
+  "post_text": "Extracted post text from browser snapshot/full page",
+  "links": ["https://github.com/owner/repo"],
+  "screenshot_path": "/optional/path.png",
+  "notes": "optional ingest hints"
+}
+
+Output: JSON with raw_path and detected github_repos.
+`.trim());
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (args.help) {
+    printUsage();
+    return;
+  }
+  if (!args.input) {
+    throw new Error('--input is required');
+  }
+  const result = writeFacebookCapture(args.input, { wikiRoot: args.wikiRoot });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+main().catch((err) => {
+  process.stderr.write(JSON.stringify({ status: 'error', errors: [err.message] }, null, 2) + '\n');
+  process.exit(1);
+});
