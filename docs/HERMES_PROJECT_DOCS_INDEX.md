@@ -79,6 +79,9 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/FACEBOOK_CAPTURE_TO_WIKI_INBOX_TOOL.md`  
   Documentation for the HerResearch-to-HerWiki Facebook capture helper. It writes standardized raw markdown captures into the wiki `raw/inbox/` for later HerWiki ingest.
 
+- `docs/FACEBOOK_BATCH_CAPTURE_TO_WIKI_INBOX_TOOL.md`  
+  Documentation for the deterministic batch Facebook capture helper. Use this when HerResearch processes multiple Facebook links and must report exact `raw_path` values while skipping login-wall or blocked links.
+
 - `docs/HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md`  
   Documentation for the HerWiki helper that resolves the newest markdown file in `raw/inbox/` and emits a ready-to-use ingest prompt.
 

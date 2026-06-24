@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const { processBatch } = require('../src/facebookBatchCaptureToWikiInbox');
+const { DEFAULT_WIKI_ROOT } = require('../src/facebookCaptureToWikiInbox');
+
+function parseJsonInput(value) {
+  const trimmed = String(value || '').trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed);
+  }
+  return JSON.parse(fs.readFileSync(trimmed, 'utf-8'));
+}
+
+function parseArgs(argv) {
+  const args = { input: null, wikiRoot: null, help: false };
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--input' && argv[i + 1]) {
+      args.input = parseJsonInput(argv[++i]);
+    } else if (arg === '--wiki-root' && argv[i + 1]) {
+      args.wikiRoot = argv[++i];
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return args;
+}
+
+function printUsage() {
+  console.log(`
+Facebook Batch Capture To Wiki Inbox
+====================================
+
+Write only successfully captured Facebook posts to wiki raw/inbox and return an exact batch summary.
+Blocked/login-wall links are reported in failed[] and do not create raw files.
+
+Usage:
+  facebook-batch-capture-to-wiki-inbox --input /path/to/batch.json
+  facebook-batch-capture-to-wiki-inbox --input '{ "items": [...] }'
+  facebook-batch-capture-to-wiki-inbox --input batch.json --wiki-root ${DEFAULT_WIKI_ROOT}
+
+Input item examples:
+{
+  "source_url": "https://www.facebook.com/groups/.../permalink/...",
+  "status": "captured",
+  "title": "Page title",
+  "post_text": "Actual post/comment text",
+  "links": ["https://github.com/owner/repo"]
+}
+
+{
+  "source_url": "https://www.facebook.com/reel/...",
+  "status": "login_required",
+  "reason": "Facebook login wall"
+}
+
+Output: JSON with completed[].raw_path and failed[] reasons.
+`.trim());
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (args.help) {
+    printUsage();
+    return;
+  }
+  if (!args.input) {
+    throw new Error('--input is required');
+  }
+  const result = processBatch(args.input, { wikiRoot: args.wikiRoot });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+main().catch((err) => {
+  process.stderr.write(JSON.stringify({ status: 'error', errors: [err.message] }, null, 2) + '\n');
+  process.exit(1);
+});
