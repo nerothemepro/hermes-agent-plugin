@@ -70,6 +70,21 @@ Fix: increase context in LM Studio, reload the model, restart `herresearch`, the
 
 Run these from Windows PowerShell.
 
+
+Fast recovery command, recommended when one or more Telegram bots stop replying after PC/Docker restart:
+
+```powershell
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh"
+```
+
+This checks all known profiles (`hervid herresearch herdev hertran herwiki`) and starts only gateways that are not running. It does not interrupt profiles that are already alive.
+
+Force restart all five profiles only when you explicitly want to stop current sessions:
+
+```powershell
+docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh --restart"
+```
+
 Start all profiles:
 
 ```powershell

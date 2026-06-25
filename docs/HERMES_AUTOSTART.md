@@ -10,6 +10,7 @@ gateways come up automatically:
 - `herresearch` — research/browser/CLI
 - `herdev` — dev/code
 - `hertran` — translation / PM drafting
+- `herwiki` — wiki maintenance
 
 Result: chatting with the agents on Telegram gets no reply until the gateways
 are started by hand.
@@ -29,7 +30,16 @@ bash /workspace/hermes-agent-plugin/scripts/herprofiles_boot.sh
 bash /workspace/hermes-agent-plugin/scripts/herprofiles_boot.sh --keep-alive
 ```
 
-Profile list defaults to `hervid herresearch herdev hertran`; override with the
+Manual recovery after restart:
+
+```bash
+bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh
+```
+
+This is safer than a blind restart because it starts only profiles that are actually down. Use `--restart` only when you intentionally want to stop/start all profiles.
+
+
+Profile list defaults to `hervid herresearch herdev hertran herwiki`; override with the
 `HERMES_PROFILES` env var.
 
 ## Data safety
