@@ -1,5 +1,3 @@
-. "$PSScriptRoot/HermesHostCommon.ps1"
-
 param(
     [string]$ContainerName = "hermes-sandbox",
     [string]$LmStudioBaseUrl = "http://127.0.0.1:1234",
@@ -9,6 +7,8 @@ param(
     [switch]$WarmHerDev,
     [switch]$ShowStatus
 )
+
+. "$PSScriptRoot/HermesHostCommon.ps1"
 
 Write-Step "bootstrapping LM Studio + Hermes stack"
 Write-Step "assumption: per-model defaults are already saved in LM Studio"
