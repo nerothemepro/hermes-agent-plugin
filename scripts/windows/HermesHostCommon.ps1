@@ -99,7 +99,7 @@ function Invoke-DockerBash {
 
     & docker exec $ContainerName bash -lc $Command
     if ($LASTEXITCODE -ne 0) {
-        throw "docker exec failed for container $ContainerName: $Command"
+        throw ("docker exec failed for container {0}: {1}" -f $ContainerName, $Command)
     }
 }
 
