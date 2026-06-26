@@ -16,7 +16,7 @@ while IFS= read -r pid; do
   proc_home="$(tr '\000' '\n' < "/proc/$pid/environ" | sed -n 's/^HERMES_HOME=//p' | head -1)"
   if [[ "$proc_home" == "$HERMES_HOME" ]]; then
     if [[ "$found" -eq 0 ]]; then
-      echo "✓ Gateway is running for $PROFILE"
+      echo "OK: Gateway is running for $PROFILE"
       echo "  HERMES_HOME=$HERMES_HOME"
     fi
     ps -p "$pid" -o pid,ppid,cmd --no-headers
@@ -25,7 +25,7 @@ while IFS= read -r pid; do
 done < <(pgrep -f "hermes gateway run" || true)
 
 if [[ "$found" -eq 0 ]]; then
-  echo "✗ Gateway is not running for $PROFILE"
+  echo "FAIL: Gateway is not running for $PROFILE"
   echo "  HERMES_HOME=$HERMES_HOME"
   exit 1
 fi

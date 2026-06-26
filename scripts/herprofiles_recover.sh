@@ -55,31 +55,31 @@ for profile in $PROFILES; do
   log_file="$home/logs/gateway.log"
 
   if [[ ! -d "$home" ]]; then
-    echo "[recover] ✗ $profile: profile dir not found ($home), skipping"
+    echo "[recover] FAIL $profile: profile dir not found ($home), skipping"
     continue
   fi
 
   if [[ "$MODE" == "restart" ]]; then
-    echo "[recover] ↻ $profile: stopping existing gateway if any"
+    echo "[recover] RESTART $profile: stopping existing gateway if any"
     bash "$STOP_SH" "$profile" >/tmp/herprofile_stop_"$profile".log 2>&1 || true
     sleep 1
   elif is_running "$home"; then
-    echo "[recover] ✓ $profile: already running"
+    echo "[recover] OK $profile: already running"
     bash "$STATUS_SH" "$profile" 2>/dev/null | sed 's/^/[recover]   /'
     continue
   fi
 
-  echo "[recover] + $profile: starting gateway"
+  echo "[recover] START $profile: starting gateway"
   if bash "$START_SH" "$profile"; then
     sleep 2
     if is_running "$home"; then
-      echo "[recover] ✓ $profile: running"
+      echo "[recover] OK $profile: running"
     else
-      echo "[recover] ✗ $profile: start command returned success but no gateway process found"
+      echo "[recover] FAIL $profile: start command returned success but no gateway process found"
       [[ -f "$log_file" ]] && tail -40 "$log_file" | sed 's/^/[recover]   log: /'
     fi
   else
-    echo "[recover] ✗ $profile: start failed"
+    echo "[recover] FAIL $profile: start failed"
     [[ -f "$log_file" ]] && tail -40 "$log_file" | sed 's/^/[recover]   log: /'
   fi
 done

@@ -17,16 +17,20 @@ Start-LmsServerProcess
 Wait-LmsApi -BaseUrl $LmStudioBaseUrl
 
 Ensure-LmsModelLoaded -ModelId $SharedModel
+Assert-LmsModelLoaded -ModelId $SharedModel
 
 if ($WarmHerVid) {
     Ensure-LmsModelLoaded -ModelId "google/gemma-4-12b-qat"
+    Assert-LmsModelLoaded -ModelId "google/gemma-4-12b-qat"
 }
 
 if ($WarmHerDev) {
     Ensure-LmsModelLoaded -ModelId "qwen/qwen3.6-27b"
+    Assert-LmsModelLoaded -ModelId "qwen/qwen3.6-27b"
 }
 
 Ensure-DockerContainerStarted -ContainerName $ContainerName
+Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $SharedModel
 Recover-HermesProfiles -ContainerName $ContainerName -Profiles $Profiles
 
 if ($ShowStatus) {

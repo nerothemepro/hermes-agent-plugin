@@ -106,6 +106,48 @@ function Ensure-LmsModelLoaded {
     [void](Invoke-LmsCommand -Arguments @("load", $ModelId))
 }
 
+function Assert-LmsModelLoaded {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelId
+    )
+
+    $loaded = Get-LmsLoadedModelsText
+    if ($loaded -notmatch [regex]::Escape($ModelId)) {
+        throw ("LM Studio model is not loaded: {0}`nCurrent models:`n{1}" -f $ModelId, $loaded)
+    }
+    Write-Step "verified loaded model: $ModelId"
+    if ($loaded) {
+        Write-Output $loaded
+    }
+}
+
+function Assert-ContainerSeesModel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+        [Parameter(Mandatory = $true)]
+        [string]$ModelId,
+        [string]$LmStudioBaseUrl = "http://host.docker.internal:1234"
+    )
+
+    $cmd = "python3 - <<'PY'
+import json, urllib.request
+url = '$LmStudioBaseUrl/v1/models'
+with urllib.request.urlopen(url, timeout=10) as r:
+    data = json.load(r)
+ids = [item.get('id') for item in data.get('data', [])]
+print('\n'.join(str(x) for x in ids))
+if '$ModelId' not in ids:
+    raise SystemExit(1)
+PY"
+    $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("exec", $ContainerName, "bash", "-lc", $cmd)
+    if ($result.ExitCode -ne 0) {
+        throw ("container cannot see LM Studio model {0}`n{1}" -f $ModelId, $result.Combined)
+    }
+    Write-Step "verified container-visible model: $ModelId"
+}
+
 function Ensure-DockerContainerStarted {
     param(
         [Parameter(Mandatory = $true)]
