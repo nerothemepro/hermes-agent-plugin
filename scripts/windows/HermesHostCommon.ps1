@@ -53,9 +53,12 @@ function Wait-LmsApi {
 }
 
 function Get-LmsLoadedModelsText {
-    $output = & lms ps 2>$null | Out-String
+    $output = (& lms ps 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
-        throw "LM Studio CLI failed: lms ps"
+        if ($output -match "No models are currently loaded") {
+            return ""
+        }
+        throw ("LM Studio CLI failed: lms ps -> {0}" -f $output)
     }
     return $output
 }
