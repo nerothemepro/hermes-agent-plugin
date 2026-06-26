@@ -6,16 +6,49 @@ function Write-Step {
     Write-Host "[hermes-host] $Message"
 }
 
+function Invoke-NativeCapture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    foreach ($arg in $Arguments) {
+        [void]$psi.ArgumentList.Add($arg)
+    }
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+
+    return [pscustomobject]@{
+        ExitCode = $proc.ExitCode
+        StdOut = $stdout
+        StdErr = $stderr
+        Combined = (($stdout + "`n" + $stderr).Trim())
+    }
+}
+
 function Invoke-LmsCommand {
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$Arguments
     )
 
-    & lms @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "LM Studio CLI failed: lms $($Arguments -join ' ')"
+    $result = Invoke-NativeCapture -FilePath "lms" -Arguments $Arguments
+    if ($result.ExitCode -ne 0) {
+        throw ("LM Studio CLI failed: lms {0}`n{1}" -f ($Arguments -join ' '), $result.Combined)
     }
+    return $result
 }
 
 function Start-LmsServerProcess {
@@ -53,14 +86,14 @@ function Wait-LmsApi {
 }
 
 function Get-LmsLoadedModelsText {
-    $output = (& lms ps 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        if ($output -match "No models are currently loaded") {
+    $result = Invoke-NativeCapture -FilePath "lms" -Arguments @("ps")
+    if ($result.ExitCode -ne 0) {
+        if ($result.Combined -match "No models are currently loaded") {
             return ""
         }
-        throw ("LM Studio CLI failed: lms ps -> {0}" -f $output)
+        throw ("LM Studio CLI failed: lms ps`n{0}" -f $result.Combined)
     }
-    return $output
+    return $result.Combined
 }
 
 function Ensure-LmsModelLoaded {
@@ -76,7 +109,7 @@ function Ensure-LmsModelLoaded {
     }
 
     Write-Step "loading model: $ModelId"
-    Invoke-LmsCommand -Arguments @("load", $ModelId)
+    [void](Invoke-LmsCommand -Arguments @("load", $ModelId))
 }
 
 function Ensure-DockerContainerStarted {
@@ -86,9 +119,9 @@ function Ensure-DockerContainerStarted {
     )
 
     Write-Step "starting Docker container: $ContainerName"
-    & docker start $ContainerName | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker start failed for container: $ContainerName"
+    $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("start", $ContainerName)
+    if ($result.ExitCode -ne 0) {
+        throw ("docker start failed for container {0}`n{1}" -f $ContainerName, $result.Combined)
     }
 }
 
@@ -100,9 +133,12 @@ function Invoke-DockerBash {
         [string]$Command
     )
 
-    & docker exec $ContainerName bash -lc $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw ("docker exec failed for container {0}: {1}" -f $ContainerName, $Command)
+    $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("exec", $ContainerName, "bash", "-lc", $Command)
+    if ($result.ExitCode -ne 0) {
+        throw ("docker exec failed for container {0}: {1}`n{2}" -f $ContainerName, $Command, $result.Combined)
+    }
+    if ($result.StdOut) {
+        Write-Output $result.StdOut.TrimEnd()
     }
 }
 
