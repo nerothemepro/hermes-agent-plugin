@@ -13,28 +13,22 @@ function Invoke-NativeCapture {
         [string[]]$Arguments = @()
     )
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    foreach ($arg in $Arguments) {
-        [void]$psi.ArgumentList.Add($arg)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $FilePath @Arguments 2>&1 | ForEach-Object { "$_" }
+        $exitCode = $LASTEXITCODE
     }
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    [void]$proc.Start()
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
-    $proc.WaitForExit()
-
+    $combined = (($lines | Out-String).Trim())
     return [pscustomobject]@{
-        ExitCode = $proc.ExitCode
-        StdOut = $stdout
-        StdErr = $stderr
-        Combined = (($stdout + "`n" + $stderr).Trim())
+        ExitCode = $exitCode
+        StdOut = $combined
+        StdErr = ""
+        Combined = $combined
     }
 }
 
