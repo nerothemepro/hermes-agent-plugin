@@ -131,21 +131,18 @@ function Assert-ContainerSeesModel {
         [string]$LmStudioBaseUrl = "http://host.docker.internal:1234"
     )
 
-    $cmd = "python3 - <<'PY'
-import json, urllib.request
-url = '$LmStudioBaseUrl/v1/models'
-with urllib.request.urlopen(url, timeout=10) as r:
-    data = json.load(r)
-ids = [item.get('id') for item in data.get('data', [])]
-print('\n'.join(str(x) for x in ids))
-if '$ModelId' not in ids:
-    raise SystemExit(1)
-PY"
+    $cmd = "curl -fsS '$LmStudioBaseUrl/v1/models' | jq -r '.data[].id'"
     $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("exec", $ContainerName, "bash", "-lc", $cmd)
     if ($result.ExitCode -ne 0) {
+        throw ("container model visibility check failed for {0}`n{1}" -f $ModelId, $result.Combined)
+    }
+    if ($result.Combined -notmatch [regex]::Escape($ModelId)) {
         throw ("container cannot see LM Studio model {0}`n{1}" -f $ModelId, $result.Combined)
     }
     Write-Step "verified container-visible model: $ModelId"
+    if ($result.Combined) {
+        Write-Output $result.Combined
+    }
 }
 
 function Ensure-DockerContainerStarted {
