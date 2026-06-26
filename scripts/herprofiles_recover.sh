@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_SH="$SCRIPT_DIR/herprofile_start.sh"
 STOP_SH="$SCRIPT_DIR/herprofile_stop.sh"
 STATUS_SH="$SCRIPT_DIR/herprofile_status.sh"
-PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki}"
+PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki hersocial}"
 
 MODE="recover"
 case "${1:-}" in

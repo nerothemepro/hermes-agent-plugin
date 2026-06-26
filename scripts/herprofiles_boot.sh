@@ -13,12 +13,12 @@
 #
 # Env:
 #   HERMES_PROFILES   space-separated profile list
-#                     (default: "hervid herresearch herdev hertran herwiki")
+#                     (default: "hervid herresearch herdev hertran herwiki hersocial")
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_SH="$SCRIPT_DIR/herprofile_start.sh"
-PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki}"
+PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki hersocial}"
 HERMES_BIN="${HERMES_BIN:-/workspace/.venvs/hermes-agent/bin/hermes}"
 
 KEEP_ALIVE=0

@@ -39,7 +39,7 @@ bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh
 This is safer than a blind restart because it starts only profiles that are actually down. Use `--restart` only when you intentionally want to stop/start all profiles.
 
 
-Profile list defaults to `hervid herresearch herdev hertran herwiki`; override with the
+Profile list defaults to `hervid herresearch herdev hertran herwiki hersocial`; override with the
 `HERMES_PROFILES` env var.
 
 ## Data safety
