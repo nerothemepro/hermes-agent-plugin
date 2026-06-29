@@ -55,7 +55,16 @@ bash /workspace/hermes-agent-plugin/scripts/herorches_safe_recover.sh herresearc
 
 ## Host Watchdog
 
-Windows host watchdog:
+Windows host watchdog now follows an inspect-first, recover-second contract:
+
+1. Ensure LM Studio API is reachable.
+2. Ensure the shared model is loaded.
+3. Ensure `hermes-sandbox` is running.
+4. Collect deterministic fleet health JSON.
+5. Run bounded recovery only when incidents are present.
+6. Return deterministic exit code in `-RunOnce` mode.
+
+Run once for diagnosis or Task Scheduler smoke test:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\Watch-HermesStack.ps1 -RunOnce -ShowHealth
@@ -75,6 +84,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\Watch-HermesStack.ps1
   -NotifyBotToken "<herorches_bot_token>" `
   -NotifyChatId "<your_chat_id>"
 ```
+
+### Run-once exit semantics
+
+- `0`: healthy after optional recovery
+- `2`: incidents remain after health collection and optional bounded recovery
+- `3`: hard dependency/bootstrap failure such as LM Studio, Docker, or container visibility failure
+
+### Notes
+
+- The watchdog no longer calls the broad `herprofiles_recover.sh` path on every tick.
+- Startup/bootstrap remains the job of `Start-HermesStack.ps1`.
+- The watchdog only repairs when health JSON says the fleet is degraded.
 
 ## Operational Boundary
 

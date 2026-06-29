@@ -51,6 +51,21 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/HERWIKI_SOUL.md`  
   Runtime persona/behavior layer for HerWiki. It requires reading the wiki `CLAUDE.md` contract before real wiki work.
 
+- `docs/HERORCHES_PROFILE.md`  
+  HerOrches profile notes for fleet monitoring, operator commands, and recovery boundaries.
+
+- `docs/HERORCHES_SOUL.md`  
+  Runtime persona/behavior layer for the operator bot.
+
+- `docs/HERORCHES_MONITORING_RUNBOOK.md`  
+  Runbook for HerOrches health collection, bounded recovery, and host-watchdog operations.
+
+- `docs/HERORCHES_PHASE_ROADMAP.md`  
+  Approved multi-phase roadmap for stabilizing and expanding HerOrches.
+
+- `docs/HERORCHES_PHASE1_IMPLEMENTATION_PLAN.md`  
+  Bounded implementation plan for Phase 1 host watchdog automation.
+
 ## GenVideo / HerVid Docs
 
 - `docs/HERMES_GENVIDEO_RUNBOOK.md`  

@@ -13,7 +13,7 @@ param(
 Write-Step "bootstrapping LM Studio + Hermes stack"
 Write-Step "assumption: per-model defaults are already saved in LM Studio"
 
-Start-LmsServerProcess
+Start-LmsServerProcess -BaseUrl $LmStudioBaseUrl
 Wait-LmsApi -BaseUrl $LmStudioBaseUrl
 
 Ensure-LmsModelLoaded -ModelId $SharedModel

@@ -46,6 +46,13 @@ function Invoke-LmsCommand {
 }
 
 function Start-LmsServerProcess {
+    param([string]$BaseUrl = "http://127.0.0.1:1234")
+
+    if (Test-LmsApi -BaseUrl $BaseUrl) {
+        Write-Step "LM Studio API already reachable at $BaseUrl"
+        return
+    }
+
     Write-Step "starting LM Studio server process"
     Start-Process -FilePath "lms" -ArgumentList @("server", "start") -WindowStyle Hidden | Out-Null
 }
@@ -145,11 +152,29 @@ function Assert-ContainerSeesModel {
     }
 }
 
+function Test-DockerContainerRunning {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName
+    )
+
+    $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("inspect", "-f", "{{.State.Running}}", $ContainerName)
+    if ($result.ExitCode -ne 0) {
+        return $false
+    }
+    return ($result.Combined.Trim().ToLowerInvariant() -eq 'true')
+}
+
 function Ensure-DockerContainerStarted {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ContainerName
     )
+
+    if (Test-DockerContainerRunning -ContainerName $ContainerName) {
+        Write-Step "Docker container already running: $ContainerName"
+        return
+    }
 
     Write-Step "starting Docker container: $ContainerName"
     $result = Invoke-NativeCapture -FilePath "docker" -Arguments @("start", $ContainerName)
@@ -181,13 +206,7 @@ function Get-DefaultHermesProfiles {
         [string]$ContainerName
     )
 
-    $cmd = @'
-base=(hervid herresearch herdev hertran herwiki hersocial)
-if [[ -d /opt/data/hermes-profiles/herorches ]]; then
-  base+=(herorches)
-fi
-printf "%s\n" "${base[*]}"
-'@
+    $cmd = 'profiles="hervid herresearch herdev hertran herwiki hersocial"; if [[ -d /opt/data/hermes-profiles/herorches ]]; then profiles="$profiles herorches"; fi; printf "%s\n" "$profiles"'
     $profiles = Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
     return ($profiles | Out-String).Trim()
 }
@@ -206,6 +225,64 @@ function Recover-HermesProfiles {
     Write-Step "recovering Hermes gateways in container: $Profiles"
     $cmd = "HERMES_PROFILES='$Profiles' bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh"
     Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
+}
+
+function Invoke-HermesSafeRecover {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+        [string]$Profiles = ""
+    )
+
+    if ($Profiles) {
+        $cmd = "HERMES_PROFILES='$Profiles' bash /workspace/hermes-agent-plugin/scripts/herorches_safe_recover.sh --all"
+    }
+    else {
+        $cmd = "bash /workspace/hermes-agent-plugin/scripts/herorches_safe_recover.sh --all"
+    }
+    Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
+}
+
+function Invoke-HermesHealthReportJson {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+        [string]$Profiles = "",
+        [int]$LogLines = 20,
+        [int]$TimeoutSeconds = 20
+    )
+
+    $profileArg = ""
+    if ($Profiles) {
+        $profileArg = (" --profiles '{0}'" -f $Profiles)
+    }
+    $cmd = ("python3 /workspace/hermes-agent-plugin/scripts/herorches_collect_health.py{0} --json --log-lines {1} --timeout-seconds {2}" -f $profileArg, $LogLines, $TimeoutSeconds)
+    return Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
+}
+
+function Invoke-HermesHealthReportObject {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+        [string]$Profiles = "",
+        [int]$LogLines = 20,
+        [int]$TimeoutSeconds = 20
+    )
+
+    $json = Invoke-HermesHealthReportJson -ContainerName $ContainerName -Profiles $Profiles -LogLines $LogLines -TimeoutSeconds $TimeoutSeconds
+    return [pscustomobject]@{
+        RawJson = $json
+        Report = ($json | ConvertFrom-Json -Depth 16)
+    }
+}
+
+function Get-HermesIncidentNames {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Report
+    )
+
+    return @($Report.profiles | Where-Object { $_.status -ne 'healthy' } | ForEach-Object { $_.name })
 }
 
 function Show-HermesStatus {

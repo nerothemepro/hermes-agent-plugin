@@ -22,6 +22,7 @@ After Windows reboot, bring the full stack up with minimal manual work:
 Host-side scripts:
 
 - [Start-HermesStack.ps1](/workspace/hermes-agent-plugin/scripts/windows/Start-HermesStack.ps1:1)
+- [Watch-HermesStack.ps1](/workspace/hermes-agent-plugin/scripts/windows/Watch-HermesStack.ps1:1)
 - [Warm-HerVid.ps1](/workspace/hermes-agent-plugin/scripts/windows/Warm-HerVid.ps1:1)
 - [Warm-HerDev.ps1](/workspace/hermes-agent-plugin/scripts/windows/Warm-HerDev.ps1:1)
 - [HermesHostCommon.ps1](/workspace/hermes-agent-plugin/scripts/windows/HermesHostCommon.ps1:1)
@@ -96,7 +97,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\Warm-HerDev.ps1 -Show
 
 ## Task Scheduler
 
-Recommended setup:
+Recommended setup uses two tasks, not one:
+
+### Task A — bootstrap at logon
 
 1. Open Windows Task Scheduler.
 2. Create a task triggered at logon.
@@ -109,12 +112,51 @@ powershell.exe
 4. Arguments:
 
 ```text
--ExecutionPolicy Bypass -File D:\Workspace\Video_gen_extension\hermes-agent-plugin\scripts\windows\Start-HermesStack.ps1
+-ExecutionPolicy Bypass -File D:\Workspace\Video_gen_extension\hermes-agent-plugin\scripts\windows\Start-HermesStack.ps1 -ShowStatus
+```
+
+### Task B — periodic watchdog
+
+1. Create a second task triggered every 5 minutes.
+2. Program/script:
+
+```text
+powershell.exe
+```
+
+3. Arguments:
+
+```text
+-ExecutionPolicy Bypass -File D:\Workspace\Video_gen_extension\hermes-agent-plugin\scripts\windows\Watch-HermesStack.ps1 -RunOnce
 ```
 
 Replace the file path with your real local repo path.
 
+Why this split is better:
+
+- `Start-HermesStack.ps1` is the bootstrap path.
+- `Watch-HermesStack.ps1` is the repair path.
+- This avoids using a long-running host loop when Windows Task Scheduler already gives you periodic execution.
+
 ## Verification
+
+### Bootstrap command
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Start-HermesStack.ps1 -ShowStatus
+```
+
+### Watchdog one-shot command
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Watch-HermesStack.ps1 -RunOnce -ShowHealth
+```
+
+Expected watchdog exit codes in `-RunOnce` mode:
+
+- `0`: healthy after optional recovery
+- `2`: incidents remain after recovery
+- `3`: hard dependency/bootstrap failure
 
 Check loaded LM Studio models:
 

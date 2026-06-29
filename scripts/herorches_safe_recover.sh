@@ -24,8 +24,14 @@ EOH
   exit 0
 fi
 
+PROFILE_FILTER="${HERMES_PROFILES:-}"
+
 if [[ "$TARGET" == "--all" ]]; then
-  python3 "$HEALTH_PY" --json >"$TMP_JSON"
+  if [[ -n "$PROFILE_FILTER" ]]; then
+    python3 "$HEALTH_PY" --profiles "$PROFILE_FILTER" --json >"$TMP_JSON"
+  else
+    python3 "$HEALTH_PY" --json >"$TMP_JSON"
+  fi
 else
   python3 "$HEALTH_PY" --profiles "$TARGET" --json >"$TMP_JSON"
 fi

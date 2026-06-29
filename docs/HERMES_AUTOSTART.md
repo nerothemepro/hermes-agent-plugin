@@ -142,3 +142,17 @@ Each profile log should show `✓ telegram connected`:
 ```
 /opt/data/hermes-profiles/<profile>/logs/gateway.log
 ```
+
+## Host watchdog complement
+
+Container boot alone is not enough for full-stack recovery because LM Studio runs on the Windows host. Pair container auto-start with the host-side watchdog:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Watch-HermesStack.ps1 -RunOnce
+```
+
+Recommended operational split:
+
+- container entrypoint hook: make sure gateways come up when the container starts
+- host startup script: make sure LM Studio + Docker + gateway recovery run after login
+- host watchdog one-shot via Task Scheduler: periodic health check and bounded repair
