@@ -260,6 +260,18 @@ function Invoke-HermesHealthReportJson {
     return Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
 }
 
+function ConvertFrom-HermesJson {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$JsonText
+    )
+
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        return ($JsonText | ConvertFrom-Json -Depth 16)
+    }
+    return ($JsonText | ConvertFrom-Json)
+}
+
 function Invoke-HermesHealthReportObject {
     param(
         [Parameter(Mandatory = $true)]
@@ -272,7 +284,7 @@ function Invoke-HermesHealthReportObject {
     $json = Invoke-HermesHealthReportJson -ContainerName $ContainerName -Profiles $Profiles -LogLines $LogLines -TimeoutSeconds $TimeoutSeconds
     return [pscustomobject]@{
         RawJson = $json
-        Report = ($json | ConvertFrom-Json -Depth 16)
+        Report = (ConvertFrom-HermesJson -JsonText $json)
     }
 }
 
