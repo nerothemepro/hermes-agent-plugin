@@ -2,6 +2,9 @@
 
 This file is a handoff index for a new agent taking over the Hermes multi-agent + local media/video tooling work.
 
+- `docs/BACKLOG.md`  
+  Active phased backlog for the full Hermes multi-bot stack, including HerOrches governance, portability packaging, and operator expansion.
+
 ## Core Package Docs
 
 - `README.md`  
@@ -65,6 +68,12 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 
 - `docs/HERORCHES_PHASE1_IMPLEMENTATION_PLAN.md`  
   Bounded implementation plan for Phase 1 host watchdog automation.
+
+- `docs/HERORCHES_PHASE2_IMPLEMENTATION_PLAN.md`  
+  Bounded implementation plan for Phase 2 `hermes-agent` fork governance and shortcut patch control.
+
+- `docs/HERMES_AGENT_FORK_GOVERNANCE_RUNBOOK.md`  
+  Runbook for the governed `hermes-agent` fork, including scope boundaries, branch strategy, and upstream sync workflow.
 
 ## GenVideo / HerVid Docs
 
