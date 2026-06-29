@@ -1,7 +1,7 @@
 param(
     [string]$ContainerName = "hermes-sandbox",
     [string]$LmStudioBaseUrl = "http://127.0.0.1:1234",
-    [string]$Profiles = "hervid herresearch herdev hertran herwiki hersocial",
+    [string]$Profiles = "",
     [string]$SharedModel = "google/gemma-4-26b-a4b-qat",
     [switch]$WarmHerVid,
     [switch]$WarmHerDev,
@@ -30,11 +30,17 @@ if ($WarmHerDev) {
 }
 
 Ensure-DockerContainerStarted -ContainerName $ContainerName
+
+$EffectiveProfiles = $Profiles
+if (-not $EffectiveProfiles) {
+    $EffectiveProfiles = Get-DefaultHermesProfiles -ContainerName $ContainerName
+}
+
 Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $SharedModel
-Recover-HermesProfiles -ContainerName $ContainerName -Profiles $Profiles
+Recover-HermesProfiles -ContainerName $ContainerName -Profiles $EffectiveProfiles
 
 if ($ShowStatus) {
-    Show-HermesStatus -ContainerName $ContainerName -Profiles $Profiles
+    Show-HermesStatus -ContainerName $ContainerName -Profiles $EffectiveProfiles
 }
 
 Write-Step "startup flow completed"

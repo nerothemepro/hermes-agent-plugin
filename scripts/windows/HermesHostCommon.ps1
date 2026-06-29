@@ -175,12 +175,33 @@ function Invoke-DockerBash {
     }
 }
 
+function Get-DefaultHermesProfiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName
+    )
+
+    $cmd = @'
+base=(hervid herresearch herdev hertran herwiki hersocial)
+if [[ -d /opt/data/hermes-profiles/herorches ]]; then
+  base+=(herorches)
+fi
+printf "%s\n" "${base[*]}"
+'@
+    $profiles = Invoke-DockerBash -ContainerName $ContainerName -Command $cmd
+    return ($profiles | Out-String).Trim()
+}
+
 function Recover-HermesProfiles {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ContainerName,
-        [string]$Profiles = "hervid herresearch herdev hertran herwiki hersocial"
+        [string]$Profiles = ""
     )
+
+    if (-not $Profiles) {
+        $Profiles = Get-DefaultHermesProfiles -ContainerName $ContainerName
+    }
 
     Write-Step "recovering Hermes gateways in container: $Profiles"
     $cmd = "HERMES_PROFILES='$Profiles' bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh"
@@ -191,8 +212,12 @@ function Show-HermesStatus {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ContainerName,
-        [string]$Profiles = "hervid herresearch herdev hertran herwiki hersocial"
+        [string]$Profiles = ""
     )
+
+    if (-not $Profiles) {
+        $Profiles = Get-DefaultHermesProfiles -ContainerName $ContainerName
+    }
 
     foreach ($profile in $Profiles.Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)) {
         Write-Step "status: $profile"

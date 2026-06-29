@@ -19,7 +19,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_SH="$SCRIPT_DIR/herprofile_start.sh"
 STOP_SH="$SCRIPT_DIR/herprofile_stop.sh"
 STATUS_SH="$SCRIPT_DIR/herprofile_status.sh"
-PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki hersocial}"
+PROFILE_BASE="${HERPROFILE_BASE:-/opt/data/hermes-profiles}"
+DEFAULT_PROFILES="hervid herresearch herdev hertran herwiki hersocial"
+if [[ -d "$PROFILE_BASE/herorches" ]]; then
+  DEFAULT_PROFILES="$DEFAULT_PROFILES herorches"
+fi
+PROFILES="${HERMES_PROFILES:-$DEFAULT_PROFILES}"
 
 MODE="recover"
 case "${1:-}" in
@@ -51,7 +56,7 @@ is_running() {
 echo "[recover] mode=$MODE profiles=$PROFILES"
 
 for profile in $PROFILES; do
-  home="${HERPROFILE_BASE:-/opt/data/hermes-profiles}/$profile"
+  home="$PROFILE_BASE/$profile"
   log_file="$home/logs/gateway.log"
 
   if [[ ! -d "$home" ]]; then

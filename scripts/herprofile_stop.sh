@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROFILE="${1:-}"
 if [[ -z "$PROFILE" ]]; then
-  echo "Usage: $0 <hervid|herresearch|herdev|hertran|herwiki|hersocial>" >&2
+  echo "Usage: $0 <profile>" >&2
   exit 2
 fi
 

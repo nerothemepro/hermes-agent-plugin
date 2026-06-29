@@ -53,6 +53,7 @@ That matches the current strategy:
 - shared always-on model for `herresearch`, `herwiki`, `hersocial`
 - optional on-demand warm-up for `hervid`
 - optional on-demand warm-up for `herdev`
+- optional HerOrches profile recovery after it is installed
 
 ## Usage
 

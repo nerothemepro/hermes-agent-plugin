@@ -9,6 +9,7 @@ Use it when creating profiles like:
 - `herdev`: coding/SDTK/dev work
 - `hertran`: translation and Japanese PM communication
 - `herwiki`: wiki / second brain maintenance
+- `herorches`: fleet monitoring and safe self-healing
 
 The core rule is: each bot profile must have its own `HERMES_HOME`, config, sessions, memory, logs, and Telegram bot token.
 
@@ -37,6 +38,7 @@ Recommended profile split:
 | `herdev` | `qwen/qwen3.6-27b` | `clarify`, `messaging`, `terminal`, file/search/dev tools |
 | `hertran` | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `memory` |
 | `herwiki` | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `terminal`, `file`, `search` |
+| `herorches` | `openai-codex` primary, `google/gemma-4-26b-a4b-qat` + `qwen/qwen3.6-27b` fallback | `messaging`, `terminal`, `file`, `search`, `memory` |
 
 ## 2. Create Telegram Bot Token
 

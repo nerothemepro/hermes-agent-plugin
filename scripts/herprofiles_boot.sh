@@ -13,12 +13,17 @@
 #
 # Env:
 #   HERMES_PROFILES   space-separated profile list
-#                     (default: "hervid herresearch herdev hertran herwiki hersocial")
+#                     (default: known live profiles; auto-adds herorches when installed)
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_SH="$SCRIPT_DIR/herprofile_start.sh"
-PROFILES="${HERMES_PROFILES:-hervid herresearch herdev hertran herwiki hersocial}"
+PROFILE_BASE="${HERPROFILE_BASE:-/opt/data/hermes-profiles}"
+DEFAULT_PROFILES="hervid herresearch herdev hertran herwiki hersocial"
+if [[ -d "$PROFILE_BASE/herorches" ]]; then
+  DEFAULT_PROFILES="$DEFAULT_PROFILES herorches"
+fi
+PROFILES="${HERMES_PROFILES:-$DEFAULT_PROFILES}"
 HERMES_BIN="${HERMES_BIN:-/workspace/.venvs/hermes-agent/bin/hermes}"
 
 KEEP_ALIVE=0
@@ -37,7 +42,7 @@ is_running() {
 
 echo "[boot] starting Hermes profiles: $PROFILES"
 for profile in $PROFILES; do
-  home="/opt/data/hermes-profiles/$profile"
+  home="$PROFILE_BASE/$profile"
   if [[ ! -d "$home" ]]; then
     echo "[boot] ✗ $profile: profile dir not found ($home), skipping"
     continue

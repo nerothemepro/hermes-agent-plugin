@@ -20,6 +20,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 /opt/data/hermes-profiles/herdev
 /opt/data/hermes-profiles/hertran
 /opt/data/hermes-profiles/herwiki
+/opt/data/hermes-profiles/herorches   # optional, only after installation
 ```
 
 ## Profile Roles
@@ -31,6 +32,7 @@ All profiles run inside the same `hermes-sandbox` container, but each profile ha
 | `herdev` | Coding/dev work with SDTK and local repos | `qwen/qwen3.6-27b` | `clarify`, `messaging`, `terminal`, `file`, `search` |
 | `hertran` | Translation and PM communication drafting for Japanese/English/Vietnamese email, Slack, and Teams messages | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `memory` |
 | `herwiki` | Maintain Nero's markdown-first personal wiki / second brain | `google/gemma-4-26b-a4b-qat` | `clarify`, `messaging`, `terminal`, `file`, `search` |
+| `herorches` | Fleet monitor and safe self-healing controller for all Her bots | `openai-codex` primary, local fallback to `google/gemma-4-26b-a4b-qat` and `qwen/qwen3.6-27b` | `messaging`, `terminal`, `file`, `search`, `memory` |
 
 ## External Services
 
@@ -77,7 +79,7 @@ Fast recovery command, recommended when one or more Telegram bots stop replying 
 docker exec -it hermes-sandbox bash -lc "bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh"
 ```
 
-This checks all known profiles (`hervid herresearch herdev hertran herwiki hersocial`) and starts only gateways that are not running. It does not interrupt profiles that are already alive.
+This checks all known live profiles (`hervid herresearch herdev hertran herwiki hersocial`, and `herorches` after it is installed) and starts only gateways that are not running. It does not interrupt profiles that are already alive.
 
 Force restart all five profiles only when you explicitly want to stop current sessions:
 
