@@ -101,6 +101,9 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/HERRESEARCH_SOUL.md`
   Runtime persona/bootstrap layer for HerResearch. It explicitly reloads research/browser/helper docs after fresh sessions and `/new` or `/reset`.
 
+- `docs/HERRESEARCH_GITHUB_DISCOVERY_SHORTCUT_RUNBOOK.md`
+  Repo-managed runbook for the deterministic `/github-discovery` Telegram shortcut, including scaffold, required env vars, and verification steps.
+
 - `docs/HERDEV_PROFILE.md`
   Runtime profile documentation for HerDev, including its persistent bootstrap contract for SDTK-governed repo work.
 
