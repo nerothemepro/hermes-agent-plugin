@@ -15,7 +15,8 @@ After Windows reboot, bring the full stack up with minimal manual work:
 2. Load the shared text model used by the always-on Hermes bots.
 3. Start the `hermes-sandbox` Docker container.
 4. Recover all Hermes gateways inside the container.
-5. Optionally warm HerVid or HerDev on demand.
+5. Warm HerVid by default so the first Telegram video request does not trigger an undersized LM Studio auto-load.
+6. Optionally warm HerDev on demand.
 
 ## Scripts
 
@@ -40,25 +41,26 @@ The scripts intentionally load by model id only. They do not hard-code LM Studio
 
 ## Default Policy
 
-`Start-HermesStack.ps1` preloads:
+`Start-HermesStack.ps1` now preloads by default:
 
 - `google/gemma-4-26b-a4b-qat`
-
-It does not preload by default:
-
 - `google/gemma-4-12b-qat`
+
+It still does not preload by default:
+
 - `qwen/qwen3.6-27b`
 
-That matches the current strategy:
+Why HerVid is now default-warmed:
 
-- shared always-on model for `herresearch`, `herwiki`, `hersocial`
-- optional on-demand warm-up for `hervid`
-- optional on-demand warm-up for `herdev`
-- optional HerOrches profile recovery after it is installed
+- if `google/gemma-4-12b-qat` is missing, the first HerVid request can cause LM Studio to auto-load it with an undersized real context
+- that leads to `Context length exceeded` even when the Hermes profile config declares a larger context
+- warming the model at stack startup forces LM Studio to use the saved tuned preset before Telegram traffic reaches HerVid
+
+`qwen/qwen3.6-27b` stays on-demand for `herdev`. HerOrches profile recovery remains unchanged.
 
 ## Usage
 
-### Full startup after reboot
+### Full startup after reboot (HerVid is warmed by default)
 
 From the local clone root:
 
@@ -66,10 +68,11 @@ From the local clone root:
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\Start-HermesStack.ps1 -ShowStatus
 ```
 
-### Full startup and also warm HerVid
+
+### Full startup but intentionally skip HerVid warm-up
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\Start-HermesStack.ps1 -WarmHerVid -ShowStatus
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Start-HermesStack.ps1 -SkipHerVidWarmup -ShowStatus
 ```
 
 ### Warm HerVid only when you plan to generate video
@@ -91,9 +94,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\Warm-HerDev.ps1 -Show
 1. `lms server start`
 2. Wait for `http://127.0.0.1:1234/v1/models`
 3. `lms load google/gemma-4-26b-a4b-qat`
-4. `docker start hermes-sandbox`
-5. `docker exec hermes-sandbox bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh`
-6. Optional profile status output
+4. `lms load google/gemma-4-12b-qat` unless `-SkipHerVidWarmup` is set
+5. `docker start hermes-sandbox`
+6. `docker exec hermes-sandbox bash /workspace/hermes-agent-plugin/scripts/herprofiles_recover.sh`
+7. Optional profile status output
 
 ## Task Scheduler
 

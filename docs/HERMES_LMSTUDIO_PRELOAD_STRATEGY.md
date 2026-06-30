@@ -89,9 +89,9 @@ Reason:
 - It is only needed during coding sessions.
 - Keeping it unloaded reduces idle VRAM pressure and avoids contention with the shared 26B model.
 
-### Tier 3: On-demand HerVid model
+### Tier 3: HerVid startup preload with render-time unload
 
-Prefer not to preload continuously:
+Preload at stack startup:
 
 - `google/gemma-4-12b-qat`
 
@@ -101,19 +101,19 @@ Use it for:
 
 Reason:
 
-- HerVid only needs the LLM for prompt analysis and tool orchestration.
-- For LTX renders, the pipeline can unload resident LM Studio models anyway.
-- For Wan/Comfy workflows, a warm HerVid model is helpful, but not worth keeping permanently resident if video work is intermittent.
+- If HerVid reaches LM Studio before this model is explicitly warmed, LM Studio can auto-load it with an undersized real context.
+- That has already produced `Context length exceeded` failures even though the Hermes profile declares a larger context.
+- The video pipeline still unloads resident LM Studio models before heavy LTX renders, so startup preload and render-time VRAM safety are compatible.
 
 ## Best Practical Host Workflow
 
 After Windows login:
 
 1. Start LM Studio server.
-2. Preload only the shared 26B model.
-3. Let `herprofiles_boot.sh` or `herprofiles_recover.sh` bring Hermes gateways online.
-4. Load `qwen/qwen3.6-27b` only when you plan to use HerDev.
-5. Load `google/gemma-4-12b-qat` only when you plan to use HerVid heavily.
+2. Preload the shared 26B model.
+3. Preload `google/gemma-4-12b-qat` for HerVid before Telegram traffic arrives.
+4. Let `herprofiles_boot.sh` or `herprofiles_recover.sh` bring Hermes gateways online.
+5. Load `qwen/qwen3.6-27b` only when you plan to use HerDev.
 
 ## What To Automate
 
@@ -121,13 +121,15 @@ After Windows login:
 
 - Host startup task: start LM Studio.
 - Host startup task: warm the shared `google/gemma-4-26b-a4b-qat` model with the chosen context.
+- Host startup task: warm `google/gemma-4-12b-qat` so HerVid does not rely on LM Studio auto-load defaults.
 - Container startup: continue using the existing Hermes gateway boot script.
 
 ### Automation to avoid for now
 
 - Preloading all three models on every reboot.
-- Keeping HerVid's model permanently loaded while using LTX-2.3.
 - Loading multiple instances of the same 26B model with different contexts unless you have verified the memory cost and queueing behavior.
+
+Note: preloading HerVid at startup is now intentional, but the render pipeline may still unload it during heavy LTX work to free VRAM.
 
 ## Recommended Standardization
 
@@ -136,15 +138,17 @@ If you want the simplest stable setup, standardize like this:
 - Shared always-on model:
   - `google/gemma-4-26b-a4b-qat`
   - context: `32768` or your proven stable `65536`
-- On-demand models:
+- Startup-preloaded models:
   - `google/gemma-4-12b-qat`
+- On-demand models:
   - `qwen/qwen3.6-27b`
 
 This gives:
 
 - HerResearch, HerWiki, and HerSocial ready immediately after reboot
 - HerTran ready too if the chosen shared 26B context is sufficient
-- HerVid and HerDev loaded only when needed
+- HerVid protected from undersized first-load context failures
+- HerDev loaded only when needed
 
 ## Verification
 

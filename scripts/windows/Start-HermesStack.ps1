@@ -4,6 +4,7 @@ param(
     [string]$Profiles = "",
     [string]$SharedModel = "google/gemma-4-26b-a4b-qat",
     [switch]$WarmHerVid,
+    [switch]$SkipHerVidWarmup,
     [switch]$WarmHerDev,
     [switch]$ShowStatus
 )
@@ -19,9 +20,15 @@ Wait-LmsApi -BaseUrl $LmStudioBaseUrl
 Ensure-LmsModelLoaded -ModelId $SharedModel
 Assert-LmsModelLoaded -ModelId $SharedModel
 
-if ($WarmHerVid) {
-    Ensure-LmsModelLoaded -ModelId "google/gemma-4-12b-qat"
-    Assert-LmsModelLoaded -ModelId "google/gemma-4-12b-qat"
+$HerVidModel = "google/gemma-4-12b-qat"
+$ShouldWarmHerVid = $WarmHerVid.IsPresent -or (-not $SkipHerVidWarmup.IsPresent)
+if ($ShouldWarmHerVid) {
+    Write-Step "warming HerVid model by default to avoid LM Studio auto-load with undersized context"
+    Ensure-LmsModelLoaded -ModelId $HerVidModel
+    Assert-LmsModelLoaded -ModelId $HerVidModel
+}
+else {
+    Write-Step "skipping HerVid warm-up by request"
 }
 
 if ($WarmHerDev) {
@@ -37,6 +44,9 @@ if (-not $EffectiveProfiles) {
 }
 
 Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $SharedModel
+if ($ShouldWarmHerVid) {
+    Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $HerVidModel
+}
 Recover-HermesProfiles -ContainerName $ContainerName -Profiles $EffectiveProfiles
 
 if ($ShowStatus) {
