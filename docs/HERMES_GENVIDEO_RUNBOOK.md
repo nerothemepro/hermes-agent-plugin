@@ -3,7 +3,7 @@
 This runbook captures the working setup and failure fixes for the local Hermes GenVideo workflow:
 
 ```text
-Telegram -> Hermes GenVideo profile -> generate_video tool -> ComfyUI Flux keyframe -> Wan2.1 I2V -> MEDIA:/opt/data/hermes/generated-videos/*.mp4
+Telegram -> Hermes GenVideo profile -> correct local_media tool by content type -> LTX-2.3 for realistic/social clips or Wan2.1 for anime action -> MEDIA:/opt/data/hermes/generated-videos/*.mp4
 ```
 
 ## Current working design
@@ -12,7 +12,8 @@ Telegram -> Hermes GenVideo profile -> generate_video tool -> ComfyUI Flux keyfr
 - Hermes profile/home: `/opt/data/hermes`
 - Hermes source: `/workspace/hermes-agent`
 - Local media plugin: `/workspace/hermes-agent/plugins/local_media`
-- Media pipeline: `/workspace/projects/media-pipeline/generate_video.py`
+- Wan single-shot pipeline: `/workspace/projects/media-pipeline/generate_video.py`
+- LTX single-shot pipeline: `/workspace/projects/media-pipeline/generate_ltx_video.py`
 - ComfyUI endpoint: `http://host.docker.internal:8188`
 - Wan2.1 endpoint: `http://host.docker.internal:8010`
 - LM Studio endpoint: `http://host.docker.internal:1234/v1`
@@ -130,6 +131,16 @@ Expected:
 True
 ```
 
+## Tool routing rule
+
+Use the correct video engine for the request:
+
+- `generate_ltx_video`: realistic, cinematic, camping, travel, product, lifestyle, marketing, and short social clips
+- `generate_ltx_video_sequence`: longer realistic/social multi-shot clips
+- `generate_video` / `generate_video_sequence`: Wan2.1 path for anime action or when the user explicitly names Wan2.1
+
+For the Facebook/social preview flow, do not use Wan `mode=test` as the final preview artifact. It is too short for human review and may look blank. Prefer `generate_ltx_video` with `mode=standard`.
+
 ## Smoke test vs quality
 
 Smoke test is only for plumbing:
@@ -145,6 +156,7 @@ frames=5
 wan_steps=1
 file around 200-250KB
 duration about 0.6-0.8s
+not suitable as a user-facing social preview clip
 ```
 
 Real video must use quality:

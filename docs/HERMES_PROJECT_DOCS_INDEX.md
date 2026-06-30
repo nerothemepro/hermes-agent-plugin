@@ -75,6 +75,9 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 - `docs/HERMES_AGENT_FORK_GOVERNANCE_RUNBOOK.md`  
   Runbook for the governed `hermes-agent` fork, including scope boundaries, branch strategy, and upstream sync workflow.
 
+- `docs/HERSTACK_PHASE2_5_PORTABILITY_IMPLEMENTATION_PLAN.md`  
+  Bounded implementation plan for full-stack portability packaging and operator rebuild documentation.
+
 ## GenVideo / HerVid Docs
 
 - `docs/HERMES_GENVIDEO_RUNBOOK.md`  

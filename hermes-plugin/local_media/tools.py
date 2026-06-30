@@ -30,18 +30,15 @@ ALLOWED_VIDEO_DIRS = (DEFAULT_VIDEO_DIR.resolve(),)
 ORCHESTRATOR_URL = os.environ.get("HVP_ORCHESTRATOR_URL", "http://localhost:8501")
 
 
-GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
-    "name": "generate_hervid_video",
+GENERATE_HERVID_PREVIEW_SCHEMA: dict[str, Any] = {
+    "name": "generate_hervid_preview",
     "description": (
-        "PRIMARY tool for ALL video generation requests — animation, Pixar/3D, realistic, travel, "
-        "product, social, children's content. Pass the raw user brief in ANY language (Vietnamese, "
-        "English, etc.) and the pipeline handles everything automatically: parses the brief via LM "
-        "Studio → generates creative JSON → renders multi-shot LTX-2.3 video → returns the final "
-        "mp4 path. Mechanical parameters (style=realistic, keyframe_engine=flux, "
-        "continuity=independent) are forced server-side — you cannot mis-route them. "
-        "Use this tool FIRST for every video request. Only fall back to "
-        "generate_ltx_video_sequence if the user needs explicit per-shot control or the "
-        "orchestrator service is unreachable."
+        "ALWAYS call this tool FIRST when a user asks for a video. "
+        "Generates a keyframe (composition image) from the user's brief, sends it to the user for approval, "
+        "and returns a preview_id. If the user approves the composition, pass preview_id to "
+        "generate_hervid_video to render the full video using the exact same creative parameters. "
+        "If the user wants a different composition, call generate_hervid_preview again. "
+        "Keyframe generation takes ~1-2 minutes (much faster than a full render)."
     ),
     "parameters": {
         "type": "object",
@@ -49,9 +46,55 @@ GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
             "brief": {
                 "type": "string",
                 "description": (
-                    "The user's video request, passed verbatim in whatever language they used. "
-                    "The orchestrator's LM Studio step parses and translates it internally. "
-                    "Example: 'làm video về chú gấu Pixar dễ thương vui chơi trong rừng'."
+                    "The user's video request in any language. "
+                    "Example: 'video chú cáo chạy trong rừng mùa thu, toàn thân'."
+                ),
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["test", "standard", "quality"],
+                "default": "quality",
+                "description": "Render quality for the eventual video. test=fast/low-res preview; quality=full-res.",
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "default": 900,
+                "minimum": 120,
+                "maximum": 1800,
+                "description": "Max wait time for keyframe generation. Use a higher value when ComfyUI is under load.",
+            },
+        },
+        "required": ["brief"],
+        "additionalProperties": False,
+    },
+}
+
+
+GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
+    "name": "generate_hervid_video",
+    "description": (
+        "PRIMARY Telegram-safe HerVid workflow. Render a full multi-shot HerVid video (8-60 min on RTX 3090). "
+        "MANDATORY workflow: you MUST call generate_hervid_preview first, show the keyframe image to "
+        "the user, wait for their approval, THEN call this tool with preview_id. "
+        "DO NOT call this tool with only a brief and no preview_id — skipping the preview wastes a "
+        "full render if composition is wrong (missing legs, wrong framing, wrong character). "
+        "Exception: user explicitly says 'skip preview' or 'generate directly'. "
+        "For ordinary HerVid Telegram requests, prefer this tool over generate_ltx_video."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "brief": {
+                "type": "string",
+                "description": (
+                    "The user's video request in any language. Required if preview_id is not provided."
+                ),
+            },
+            "preview_id": {
+                "type": "string",
+                "description": (
+                    "ID returned by generate_hervid_preview. When provided, reuses the approved creative "
+                    "parameters and skips the LM parsing step. Pass this after the user approves the keyframe."
                 ),
             },
             "mode": {
@@ -59,9 +102,9 @@ GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
                 "enum": ["test", "standard", "quality"],
                 "default": "quality",
                 "description": (
-                    "Render quality: test=fast smoke check (2 shots, ~15 min); "
-                    "standard=balanced; quality=best (recommended for real user videos). "
-                    "Use test only for plumbing checks."
+                    "Render quality: test=fast (2s/shot, ~8 min); "
+                    "standard=balanced; quality=best (recommended). "
+                    "Always respected — even when preview_id is provided, this mode overrides the preview's stored mode."
                 ),
             },
             "timeout_seconds": {
@@ -72,7 +115,7 @@ GENERATE_HERVID_VIDEO_SCHEMA: dict[str, Any] = {
                 "description": "Max wait time. A 30s quality video takes 30-60 min on RTX 3090.",
             },
         },
-        "required": ["brief"],
+        "required": [],
         "additionalProperties": False,
     },
 }
@@ -496,18 +539,99 @@ def _coerce_ltx_optional_int(value: Any, low: int, high: int) -> int | None:
     return max(low, min(high, number))
 
 
-def handle_generate_hervid_video(args: dict[str, Any], **kw) -> str:
+def handle_generate_hervid_preview(args: dict[str, Any], **kw) -> str:
     brief = str(args.get("brief") or "").strip()
     if not brief:
         return tool_error("brief is required")
+    mode = str(args.get("mode") or "quality").strip().lower()
+    if mode not in {"test", "standard", "quality"}:
+        mode = "quality"
+    timeout = int(args.get("timeout_seconds") or 900)
+
+    body = json.dumps({"brief": brief, "mode": mode}).encode()
+    req = urllib.request.Request(
+        f"{ORCHESTRATOR_URL}/generate-preview",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read())
+    except Exception as exc:
+        return tool_error(
+            f"generate_hervid_preview: orchestrator unreachable at {ORCHESTRATOR_URL} — {exc}. "
+            "Ensure start-services.sh has been run."
+        )
+
+    image_path = resp.get("image_path")
+    preview_id = resp.get("preview_id")
+    if not image_path or not preview_id:
+        return tool_error(f"generate_hervid_preview: unexpected response: {resp}")
+
+    return tool_result({
+        "success": True,
+        "preview_id": preview_id,
+        "image_path": str(image_path),
+        "media": f"MEDIA:{image_path}",
+        "send_to_user": f"MEDIA:{image_path}",
+        "prompt": resp.get("prompt", ""),
+        "character_note": resp.get("character_note", ""),
+        "mode": resp.get("mode", mode),
+        "note": (
+            "Show this keyframe to the user and ask if the composition looks good. "
+            "If approved, call generate_hervid_video with this preview_id to render the full video. "
+            "If the user wants a different composition, call generate_hervid_preview again."
+        ),
+    })
+
+
+def handle_generate_hervid_video(args: dict[str, Any], **kw) -> str:
+    preview_id = str(args.get("preview_id") or "").strip()
+    brief = str(args.get("brief") or "").strip()
+    if not preview_id and not brief:
+        return tool_error("either brief or preview_id is required")
+
+    # Auto-run the preview step when no preview_id is supplied.
+    # This ensures the keyframe is always shown to the user before the full render,
+    # even when the model skips the explicit generate_hervid_preview call.
+    if not preview_id:
+        preview_timeout = int(args.get("preview_timeout_seconds") or args.get("timeout_seconds") or 900)
+        preview_result_str = handle_generate_hervid_preview(
+            {"brief": brief, "mode": args.get("mode") or "quality", "timeout_seconds": preview_timeout},
+            **kw,
+        )
+        try:
+            preview_result = json.loads(preview_result_str)
+        except Exception:
+            return preview_result_str
+        if "error" in preview_result:
+            return preview_result_str
+        preview_id = str(preview_result.get("preview_id") or "")
+        image_path = preview_result.get("image_path", "")
+        return tool_result({
+            "success": True,
+            "action": "preview_sent",
+            "preview_id": preview_id,
+            "image_path": str(image_path),
+            "media": f"MEDIA:{image_path}",
+            "send_to_user": f"MEDIA:{image_path}",
+            "prompt": preview_result.get("prompt", ""),
+            "note": (
+                "Keyframe image sent to user. STOP — do not call generate_hervid_video yet. "
+                "Show this image to the user and ask if the composition looks good. "
+                f"When the user approves, call generate_hervid_video with preview_id={preview_id!r}. "
+                "If the user wants changes, call generate_hervid_preview again with a revised brief."
+            ),
+        })
 
     mode = str(args.get("mode") or "quality").strip().lower()
     if mode not in {"test", "standard", "quality"}:
         mode = "quality"
     timeout = _coerce_seq_timeout(args.get("timeout_seconds"))
 
-    # Submit to orchestrator
-    body = json.dumps({"brief": brief, "mode": mode}).encode()
+    # Submit to orchestrator — pass preview_id to skip LM step when available
+    body = json.dumps({"brief": brief or "(from preview)", "mode": mode, "preview_id": preview_id or None}).encode()
     req = urllib.request.Request(
         f"{ORCHESTRATOR_URL}/generate-video",
         data=body,
