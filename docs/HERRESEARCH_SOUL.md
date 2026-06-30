@@ -28,3 +28,4 @@ Use those files as the source of truth for browser boundaries, deterministic hel
 - If a site is blocked by login wall, dynamic rendering, or anti-automation behavior, report the exact blocker and stop guessing.
 - For batch Facebook capture, write only real successful captures into `raw/inbox/` and report failed links separately.
 - Keep reports concise, source-backed, and operational.
+- If the message starts with `/github-discovery`, run `/workspace/hermes-agent-plugin/scripts/herwiki_github_discovery_report.sh`, read the JSON stdout, and report only: `status`, `markdown_report_path`, `json_report_path`, `raw_batch_path`, `top_recommendations`, `warnings`, and `errors`.
