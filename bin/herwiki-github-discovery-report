@@ -1,0 +1,124 @@
+#!/usr/bin/env node
+'use strict';
+
+const {
+  DEFAULT_KEYWORD_QUERIES,
+  DEFAULT_TOPIC_SEEDS,
+  generateGithubDiscoveryReport,
+  summarizeForStdout,
+} = require('../src/herwikiGithubDiscoveryReport');
+
+function parseCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function parseArgs(argv) {
+  const args = {
+    wikiRoot: null,
+    topicSeeds: null,
+    keywordQueries: null,
+    perPage: 20,
+    timeoutSeconds: 30,
+    generatedAt: null,
+    githubTokenEnv: 'GITHUB_TOKEN',
+    ossMomentumFile: null,
+    ossMomentumUrl: null,
+    help: false,
+  };
+
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if ((arg === '--wiki-root' || arg === '--project-path') && argv[i + 1]) {
+      args.wikiRoot = argv[++i];
+    } else if (arg === '--topics' && argv[i + 1]) {
+      args.topicSeeds = parseCsv(argv[++i]);
+    } else if (arg === '--keywords' && argv[i + 1]) {
+      args.keywordQueries = parseCsv(argv[++i]);
+    } else if (arg === '--per-page' && argv[i + 1]) {
+      args.perPage = Number(argv[++i]);
+    } else if (arg === '--timeout-seconds' && argv[i + 1]) {
+      args.timeoutSeconds = Number(argv[++i]);
+    } else if (arg === '--generated-at' && argv[i + 1]) {
+      args.generatedAt = argv[++i];
+    } else if (arg === '--github-token-env' && argv[i + 1]) {
+      args.githubTokenEnv = argv[++i];
+    } else if (arg === '--oss-momentum-file' && argv[i + 1]) {
+      args.ossMomentumFile = argv[++i];
+    } else if (arg === '--oss-momentum-url' && argv[i + 1]) {
+      args.ossMomentumUrl = argv[++i];
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return args;
+}
+
+function printUsage() {
+  console.log(`
+HerWiki GitHub Discovery Report
+==============================
+
+Generate a deterministic, report-first daily GitHub discovery report for HerWiki.
+This tool never ingests or rewrites wiki pages. It writes review artifacts only.
+
+Usage:
+  herwiki-github-discovery-report
+  herwiki-github-discovery-report --wiki-root /workspace/sdtk-wiki/ai-agent-second-brain-main
+  herwiki-github-discovery-report --topics ai-agents,multi-agent,rag
+  herwiki-github-discovery-report --keywords "AI agent framework,advanced RAG workflow"
+
+Options:
+  --wiki-root <path>          Override wiki root. Alias: --project-path
+  --topics <csv>              Override topic seeds
+  --keywords <csv>            Override keyword query set
+  --per-page <n>              GitHub search page size per query (default: 20)
+  --timeout-seconds <n>       Request timeout in seconds (default: 30)
+  --generated-at <iso>        Override timestamp for deterministic testing
+  --github-token-env <name>   Environment variable that holds the GitHub token (default: GITHUB_TOKEN)
+  --oss-momentum-file <path>  Optional JSON file with { momentumByRepo: { ... } }
+  --oss-momentum-url <url>    Optional JSON endpoint with { momentumByRepo: { ... } }
+  --help                      Show this help
+
+Default topic seeds:
+  ${DEFAULT_TOPIC_SEEDS.join(', ')}
+
+Default keyword queries:
+  ${DEFAULT_KEYWORD_QUERIES.join(', ')}
+`.trim());
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (args.help) {
+    printUsage();
+    return;
+  }
+
+  const githubToken = process.env[args.githubTokenEnv] || '';
+  const result = await generateGithubDiscoveryReport({
+    wikiRoot: args.wikiRoot,
+    topicSeeds: args.topicSeeds || DEFAULT_TOPIC_SEEDS,
+    keywordQueries: args.keywordQueries || DEFAULT_KEYWORD_QUERIES,
+    perPage: Number.isFinite(args.perPage) && args.perPage > 0 ? args.perPage : 20,
+    timeoutMs: (Number.isFinite(args.timeoutSeconds) && args.timeoutSeconds > 0 ? args.timeoutSeconds : 30) * 1000,
+    generatedAt: args.generatedAt || null,
+    githubToken,
+    ossMomentumFile: args.ossMomentumFile || null,
+    ossMomentumUrl: args.ossMomentumUrl || null,
+  });
+
+  process.stdout.write(JSON.stringify(summarizeForStdout(result), null, 2) + '\n');
+}
+
+main().catch((err) => {
+  process.stderr.write(JSON.stringify({
+    status: 'error',
+    errors: [err.message],
+  }, null, 2) + '\n');
+  process.exit(1);
+});

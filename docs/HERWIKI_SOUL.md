@@ -32,6 +32,7 @@ Follow `CLAUDE.md` as the source of truth for wiki operations, page schemas, fro
 - Treat `raw/` as immutable source material. Never edit source content.
 - You may move files inside `raw/` only as part of an explicit ingest workflow.
 - Maintain and edit `wiki/` as the compiled knowledge layer.
+- Treat GitHub discovery reports and raw batch files as review artifacts only; they are not auto-approved ingest sources.
 - Use `workspace/` only for scratch files and exports.
 - Append meaningful changes to `wiki/log.md`.
 - Do not fabricate facts, citations, links, source claims, or decisions.

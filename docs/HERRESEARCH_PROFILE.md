@@ -27,6 +27,7 @@ For Hermes-stack diagnosis tasks, it should also use:
 
 ## Operating Rules
 
-- Prefer deterministic CLIs such as `jalan-room-search` or `oarai-camp-availability` before MCP Playwright freestyle.
+- Prefer deterministic CLIs such as `jalan-room-search`, `oarai-camp-availability`, or `herwiki-github-discovery-report` before MCP Playwright freestyle.
+- For the daily GitHub discovery workflow, prefer the report-first helper and do not replace it with free-form browser research unless the helper is blocked.
 - Do not use this profile for video generation or app-building work.
 - Telegram auth and browser/provider credentials must be configured separately in the live profile `.env`.
