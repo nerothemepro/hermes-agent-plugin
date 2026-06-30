@@ -52,16 +52,19 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
   HerWiki profile notes for maintaining Nero's markdown-first personal wiki at `/workspace/sdtk-wiki/ai-agent-second-brain-main`.
 
 - `docs/HERWIKI_SOUL.md`  
-  Runtime persona/behavior layer for HerWiki. It requires reading the wiki `CLAUDE.md` contract before real wiki work.
+  Runtime persona/behavior layer for HerWiki. It requires re-reading the wiki `CLAUDE.md` contract after fresh sessions and `/new` or `/reset`.
 
 - `docs/HERORCHES_PROFILE.md`  
   HerOrches profile notes for fleet monitoring, operator commands, and recovery boundaries.
 
 - `docs/HERORCHES_SOUL.md`  
-  Runtime persona/behavior layer for the operator bot.
+  Runtime persona/behavior layer for the operator bot. It now explicitly reloads the system handoff/runbook after fresh sessions and `/new` or `/reset`.
 
 - `docs/HERORCHES_MONITORING_RUNBOOK.md`  
   Runbook for HerOrches health collection, bounded recovery, and host-watchdog operations.
+
+- `docs/HERORCHES_SYSTEM_HANDOFF.md`  
+  Consolidated operator/diagnostic handoff for the full HerBot stack. Start here when HerOrches or a new operator needs one compact view of profile ownership, dependencies, workflows, and failure patterns.
 
 - `docs/HERORCHES_PHASE_ROADMAP.md`  
   Approved multi-phase roadmap for stabilizing and expanding HerOrches.
@@ -77,6 +80,32 @@ This file is a handoff index for a new agent taking over the Hermes multi-agent 
 
 - `docs/HERSTACK_PHASE2_5_PORTABILITY_IMPLEMENTATION_PLAN.md`  
   Bounded implementation plan for full-stack portability packaging and operator rebuild documentation.
+
+## Additional Runtime Profile Docs
+
+- `docs/HERVID_PROFILE.md`  
+  Runtime profile documentation for HerVid, including its persistent bootstrap contract and video-tool routing rules.
+
+- `docs/HERVID_SOUL.md`  
+  Runtime persona/bootstrap layer for HerVid. It explicitly reloads GenVideo runbooks after fresh sessions and `/new` or `/reset`.
+
+- `docs/HERSOCIAL_PROFILE.md`  
+  Runtime profile documentation for HerSocial, including its persistent bootstrap contract and Graph API publish boundary.
+
+- `docs/HERSOCIAL_SOUL.md`  
+  Runtime persona/bootstrap layer for HerSocial. It explicitly reloads social workflow docs after fresh sessions and `/new` or `/reset`.
+
+- `docs/HERRESEARCH_PROFILE.md`  
+  Runtime profile documentation for HerResearch, including its persistent bootstrap contract and deterministic-research helper boundaries.
+
+- `docs/HERRESEARCH_SOUL.md`  
+  Runtime persona/bootstrap layer for HerResearch. It explicitly reloads research/browser/helper docs after fresh sessions and `/new` or `/reset`.
+
+- `docs/HERDEV_PROFILE.md`  
+  Runtime profile documentation for HerDev, including its persistent bootstrap contract for SDTK-governed repo work.
+
+- `docs/HERDEV_SOUL.md`  
+  Runtime persona/bootstrap layer for HerDev. It explicitly reloads AGENTS/bootstrap working rules after fresh sessions and `/new` or `/reset`.
 
 ## GenVideo / HerVid Docs
 

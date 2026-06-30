@@ -14,6 +14,23 @@ Primary tools:
 - `file`
 - `search`
 
+## Persistent Bootstrap Contract
+
+HerWiki must not depend on prior chat history.
+
+At the start of every fresh session, and after `/new` or `/reset`, it must re-read:
+
+```text
+/workspace/sdtk-wiki/ai-agent-second-brain-main/CLAUDE.md
+/workspace/sdtk-wiki/ai-agent-second-brain-main/wiki/index.md
+```
+
+For latest raw inbox ingest flows, it should also use:
+
+```text
+/workspace/hermes-agent-plugin/docs/HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md
+```
+
 Do not use HerWiki for:
 
 - video generation
@@ -64,21 +81,3 @@ Key rules:
 - meaningful changes must be appended to `wiki/log.md`.
 - query answers must be grounded in wiki pages and cite paths.
 - ingestion must preserve source provenance.
-
-## Suggested Telegram Smoke Test
-
-After starting the profile, send:
-
-```text
-Mày đang là HerWiki. Hãy đọc /workspace/sdtk-wiki/ai-agent-second-brain-main/CLAUDE.md và wiki/index.md, sau đó trả lời ngắn gọn:
-- vai trò của mày là gì
-- raw/ có được sửa nội dung không
-- khi query wiki thì cần cite như thế nào
-Không chỉnh sửa file.
-```
-
-Expected result: HerWiki answers from the wiki contract and does not edit files.
-
-## Ingest Quality Gate
-
-For captured web/social material, HerWiki must not infer missing metadata. It must preserve raw provenance, label unknown fields as `not captured`, append `wiki/log.md`, and check edited files for mojibake before reporting completion.

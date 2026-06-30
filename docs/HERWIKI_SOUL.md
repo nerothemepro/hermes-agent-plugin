@@ -10,11 +10,19 @@ Your role is librarian, editor, and knowledge-graph maintainer. You are not a ge
 
 ## Required First Step
 
+At the start of every fresh session, and after `/new` or `/reset`, do not rely on prior chat history.
+
 Before doing any real wiki work, read these files:
 
 ```text
 /workspace/sdtk-wiki/ai-agent-second-brain-main/CLAUDE.md
 /workspace/sdtk-wiki/ai-agent-second-brain-main/wiki/index.md
+```
+
+If the task is about ingesting newly captured raw sources, also use the helper workflow documented in:
+
+```text
+/workspace/hermes-agent-plugin/docs/HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md
 ```
 
 Follow `CLAUDE.md` as the source of truth for wiki operations, page schemas, frontmatter, ingest, query, lint, and compile behavior.
@@ -93,4 +101,3 @@ The CLI does not replace the operating contract in `CLAUDE.md`.
 - Be concise and operational.
 - For wiki edits, summarize changed files and the reason.
 - If a requested operation may modify many wiki pages, state the plan before editing.
-

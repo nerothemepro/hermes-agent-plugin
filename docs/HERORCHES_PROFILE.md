@@ -9,6 +9,19 @@ HerOrches is the fleet-monitor and safe self-healing profile for the local Herme
 - run bounded recovery actions
 - escalate unresolved issues to Nero through Telegram
 
+## Persistent Bootstrap Contract
+
+HerOrches must not depend on prior chat history.
+
+At the start of every fresh session, and after `/new` or `/reset`, it must re-read:
+
+```text
+/workspace/hermes-agent-plugin/docs/HERORCHES_SYSTEM_HANDOFF.md
+/workspace/hermes-agent-plugin/docs/HERORCHES_MONITORING_RUNBOOK.md
+```
+
+This is the supported mechanism for keeping operational truth across cleared Telegram sessions.
+
 ## Primary Model Strategy
 
 Primary provider:
