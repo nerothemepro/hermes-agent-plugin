@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+'use strict';
+
+const {
+  DEFAULT_RAW_INBOX,
+  DEFAULT_REPORT_DIR,
+  DEFAULT_WIKI_ROOT,
+  runSdtkWikiAction,
+} = require('../src/herWikiSdtkWikiTool');
+
+function parseArgs(argv) {
+  const args = {
+    action: '',
+    wikiRoot: DEFAULT_WIKI_ROOT,
+    sourceRoot: DEFAULT_RAW_INBOX,
+    reportDir: DEFAULT_REPORT_DIR,
+    query: '',
+    limit: 10,
+    timeoutMs: 120000,
+    help: false,
+  };
+
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!args.action && !arg.startsWith('--')) {
+      args.action = arg;
+    } else if (arg === '--wiki-root' && argv[i + 1]) {
+      args.wikiRoot = argv[++i];
+    } else if (arg === '--source-root' && argv[i + 1]) {
+      args.sourceRoot = argv[++i];
+    } else if (arg === '--report-dir' && argv[i + 1]) {
+      args.reportDir = argv[++i];
+    } else if (arg === '--query' && argv[i + 1]) {
+      args.query = argv[++i];
+    } else if (arg === '--limit' && argv[i + 1]) {
+      args.limit = Number(argv[++i]);
+    } else if (arg === '--timeout-ms' && argv[i + 1]) {
+      args.timeoutMs = Number(argv[++i]);
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return args;
+}
+
+function printUsage() {
+  console.log(`
+HerWiki SDTK-WIKI Tool
+======================
+
+Run deterministic SDTK-WIKI actions for the fixed HerWiki workspace and print JSON.
+
+Usage:
+  herwiki-sdtk-wiki-tool ingest
+  herwiki-sdtk-wiki-tool compile
+  herwiki-sdtk-wiki-tool lint
+  herwiki-sdtk-wiki-tool maintain
+  herwiki-sdtk-wiki-tool discover
+  herwiki-sdtk-wiki-tool search --query "multi-agent"
+
+Optional:
+  --wiki-root ${DEFAULT_WIKI_ROOT}
+  --source-root ${DEFAULT_RAW_INBOX}
+  --report-dir ${DEFAULT_REPORT_DIR}
+  --limit 10
+  --timeout-ms 120000
+`.trim());
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+  if (args.help || !args.action) {
+    printUsage();
+    return;
+  }
+
+  const result = runSdtkWikiAction(args.action, args);
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  if (result.status !== 'completed') {
+    process.exitCode = 1;
+  }
+}
+
+main();

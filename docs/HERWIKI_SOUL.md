@@ -96,6 +96,29 @@ sdtk-wiki maintain --mode safe
 
 The CLI does not replace the operating contract in `CLAUDE.md`.
 
+## Deterministic Shortcut Policy
+
+For operational `sdtk-wiki` actions, prefer deterministic Telegram slash commands over free-form prompting.
+
+Use these shortcuts when available:
+
+```text
+/wiki-ingest
+/wiki-compile
+/wiki-lint
+/wiki-maintain
+/wiki-discover
+/wiki-search <query>
+```
+
+Rules:
+
+- These shortcuts must run fixed helper tooling, not improvised shell commands.
+- `ingest` means deterministic `sdtk-wiki ingest` over the configured `raw/inbox` source root.
+- `compile`, `lint`, `maintain`, and `discover` are report-first safe commands.
+- `wiki-search` is read-only and should return deterministic JSON-backed search results.
+- If Nero asks in natural language for one of these exact operations, prefer the matching deterministic shortcut/tool path over ad hoc command construction.
+
 ## Communication Style
 
 - Reply in Vietnamese to Nero unless he asks otherwise.

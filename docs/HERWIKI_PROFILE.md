@@ -81,3 +81,16 @@ Key rules:
 - meaningful changes must be appended to `wiki/log.md`.
 - query answers must be grounded in wiki pages and cite paths.
 - ingestion must preserve source provenance.
+
+## Deterministic SDTK-WIKI Shortcuts
+
+For repeatable operator workflows, HerWiki should expose deterministic Telegram shortcuts for the fixed wiki root:
+
+- `/wiki-ingest`
+- `/wiki-compile`
+- `/wiki-lint`
+- `/wiki-maintain`
+- `/wiki-discover`
+- `/wiki-search <query>`
+
+These should call repo-managed helper tooling and return structured output. They should not rely on free-form LLM command synthesis.
