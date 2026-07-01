@@ -109,7 +109,7 @@ Examples:
 
 ## Output Contract
 
-All shortcuts return JSON with a stable shape similar to:
+The helper CLI returns JSON with a stable shape similar to:
 
 ```json
 {
@@ -134,8 +134,20 @@ For `wiki-search`, the payload also includes:
 - `search_meta`
 
 Notes:
-- `report_paths` is now sanitized to remove blank entries.
-- `wiki-search` intentionally returns a compact deterministic summary so Telegram replies do not explode into oversized multi-part JSON as easily.
+- `report_paths` is sanitized to remove blank entries.
+- `wiki-search` helper output uses compact top-match results instead of full raw search JSON.
+
+## Telegram Reply Format
+
+The Hermes gateway formats helper JSON into a short operator-facing summary before sending it to Telegram. The reply includes:
+
+- `Status` and `Action`
+- report paths for report-producing commands
+- key `sdtk-wiki` stdout summary lines
+- for `wiki-search`, query, shown/total count, scanned file count, and up to five top matches
+- warnings and errors, when present
+
+If helper output is not valid JSON, the gateway returns the raw output so failures stay visible.
 
 ## Operator Guidance
 

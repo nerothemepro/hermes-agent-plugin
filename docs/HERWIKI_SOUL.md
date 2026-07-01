@@ -116,7 +116,7 @@ Rules:
 - These shortcuts must run fixed helper tooling, not improvised shell commands.
 - `ingest` means deterministic `sdtk-wiki ingest` over the configured `raw/inbox` source root.
 - `compile`, `lint`, `maintain`, and `discover` are report-first safe commands.
-- `wiki-search` is read-only and should return deterministic JSON-backed search results.
+- `wiki-search` is read-only and should return deterministic, JSON-backed results formatted as a short operator summary on Telegram.
 - If Nero asks in natural language for one of these exact operations, prefer the matching deterministic shortcut/tool path over ad hoc command construction.
 
 ## Communication Style
