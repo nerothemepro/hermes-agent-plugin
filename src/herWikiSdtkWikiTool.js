@@ -84,6 +84,65 @@ function parseSearchOutput(stdout) {
   }
 }
 
+function sanitizeReportPaths(paths) {
+  return Array.from(new Set((paths || [])
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean)));
+}
+
+function truncateSnippet(value, limit = 220) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return normalized.slice(0, Math.max(0, limit - 1)).trimEnd() + '…';
+}
+
+function normalizeSearchResults(parsed, limit) {
+  if (Array.isArray(parsed)) {
+    const matches = parsed.slice(0, limit);
+    return {
+      searchResults: matches,
+      resultCount: matches.length,
+      totalMatches: matches.length,
+      searchMeta: null,
+    };
+  }
+
+  if (parsed && typeof parsed === 'object' && Array.isArray(parsed.matches)) {
+    const matches = parsed.matches.slice(0, limit).map((match) => ({
+      path: match.path || '',
+      title: match.title || '',
+      score: match.score ?? null,
+      why: match.why || '',
+      snippet: truncateSnippet(match.snippet || ''),
+    }));
+
+    return {
+      searchResults: matches,
+      resultCount: matches.length,
+      totalMatches: Number.isFinite(parsed.totalMatches) ? parsed.totalMatches : matches.length,
+      searchMeta: {
+        scanned_files: Number.isFinite(parsed.scannedFiles) ? parsed.scannedFiles : null,
+        search_mode: parsed.searchMode || null,
+        premium_required: Boolean(parsed.premiumRequired),
+        mutated: Boolean(parsed.mutated),
+      },
+    };
+  }
+
+  return {
+    searchResults: parsed,
+    resultCount: null,
+    totalMatches: null,
+    searchMeta: null,
+  };
+}
+
 function buildArgs(action, opts) {
   const wikiRoot = path.resolve(opts.wikiRoot || DEFAULT_WIKI_ROOT);
   const rawInbox = path.resolve(opts.sourceRoot || path.join(wikiRoot, 'raw', 'inbox'));
@@ -154,7 +213,7 @@ function runSdtkWikiAction(action, opts = {}) {
 
   const stdout = (result.stdout || '').trim();
   const stderr = (result.stderr || '').trim();
-  const reportPaths = collectChangedFiles(beforeReports, reportDir, startedAtMs);
+  const reportPaths = sanitizeReportPaths(collectChangedFiles(beforeReports, reportDir, startedAtMs));
   const payload = {
     status: result.status === 0 ? 'completed' : 'error',
     action,
@@ -176,8 +235,13 @@ function runSdtkWikiAction(action, opts = {}) {
     payload.limit = command.limit;
     const parsed = parseSearchOutput(stdout);
     if (parsed !== null) {
-      payload.search_results = parsed;
-      payload.result_count = Array.isArray(parsed) ? parsed.length : null;
+      const normalized = normalizeSearchResults(parsed, command.limit);
+      payload.search_results = normalized.searchResults;
+      payload.result_count = normalized.resultCount;
+      payload.total_matches = normalized.totalMatches;
+      if (normalized.searchMeta) {
+        payload.search_meta = normalized.searchMeta;
+      }
     } else {
       payload.stdout = stdout;
       payload.warnings.push('search output was not valid JSON');
@@ -209,7 +273,10 @@ module.exports = {
   DEFAULT_WIKI_ROOT,
   buildArgs,
   collectChangedFiles,
+  normalizeSearchResults,
   parseSearchOutput,
   runSdtkWikiAction,
+  sanitizeReportPaths,
   snapshotFiles,
+  truncateSnippet,
 };

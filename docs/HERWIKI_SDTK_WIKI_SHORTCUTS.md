@@ -128,8 +128,14 @@ For `wiki-search`, the payload also includes:
 
 - `query`
 - `limit`
-- `search_results`
+- `search_results` (compact top-match list, not the full raw search JSON)
 - `result_count`
+- `total_matches`
+- `search_meta`
+
+Notes:
+- `report_paths` is now sanitized to remove blank entries.
+- `wiki-search` intentionally returns a compact deterministic summary so Telegram replies do not explode into oversized multi-part JSON as easily.
 
 ## Operator Guidance
 
