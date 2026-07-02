@@ -112,8 +112,8 @@ After Windows login:
 1. Start LM Studio server.
 2. Preload the shared 26B model.
 3. Preload `google/gemma-4-12b-qat` for HerVid before Telegram traffic arrives.
-4. Let `herprofiles_boot.sh` or `herprofiles_recover.sh` bring Hermes gateways online.
-5. Load `qwen/qwen3.6-27b` only when you plan to use HerDev.
+4. Preload `qwen/qwen3.6-27b` for HerDev before coding/SDTK requests arrive.
+5. Let `herprofiles_boot.sh` or `herprofiles_recover.sh` bring Hermes gateways online.
 
 ## What To Automate
 
@@ -122,14 +122,15 @@ After Windows login:
 - Host startup task: start LM Studio.
 - Host startup task: warm the shared `google/gemma-4-26b-a4b-qat` model with the chosen context.
 - Host startup task: warm `google/gemma-4-12b-qat` so HerVid does not rely on LM Studio auto-load defaults.
+- Host startup task: warm `qwen/qwen3.6-27b` so HerDev is ready for coding/SDTK work immediately after reboot.
 - Container startup: continue using the existing Hermes gateway boot script.
 
-### Automation to avoid for now
+### Automation to watch carefully
 
-- Preloading all three models on every reboot.
-- Loading multiple instances of the same 26B model with different contexts unless you have verified the memory cost and queueing behavior.
+- Preloading all three primary models on every reboot is now intentional for this operator setup, but it increases idle VRAM/RAM pressure.
+- Loading multiple instances of the same 26B model with different contexts should still be avoided unless you have verified the memory cost and queueing behavior.
 
-Note: preloading HerVid at startup is now intentional, but the render pipeline may still unload it during heavy LTX work to free VRAM.
+Note: preloading HerVid and HerDev at startup is now intentional, but the render pipeline may still unload resident LM Studio models during heavy LTX work to free VRAM.
 
 ## Recommended Standardization
 
@@ -140,15 +141,16 @@ If you want the simplest stable setup, standardize like this:
   - context: `32768` or your proven stable `65536`
 - Startup-preloaded models:
   - `google/gemma-4-12b-qat`
-- On-demand models:
   - `qwen/qwen3.6-27b`
+- On-demand models:
+  - none by default; use `-SkipHerDevWarmup` or `-SkipHerVidWarmup` when intentionally reducing startup memory pressure
 
 This gives:
 
 - HerResearch, HerWiki, and HerSocial ready immediately after reboot
 - HerTran ready too if the chosen shared 26B context is sufficient
 - HerVid protected from undersized first-load context failures
-- HerDev loaded only when needed
+- HerDev ready immediately for coding/SDTK work after reboot
 
 ## Verification
 

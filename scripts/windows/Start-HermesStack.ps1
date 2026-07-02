@@ -6,6 +6,7 @@ param(
     [switch]$WarmHerVid,
     [switch]$SkipHerVidWarmup,
     [switch]$WarmHerDev,
+    [switch]$SkipHerDevWarmup,
     [switch]$ShowStatus
 )
 
@@ -31,9 +32,15 @@ else {
     Write-Step "skipping HerVid warm-up by request"
 }
 
-if ($WarmHerDev) {
-    Ensure-LmsModelLoaded -ModelId "qwen/qwen3.6-27b"
-    Assert-LmsModelLoaded -ModelId "qwen/qwen3.6-27b"
+$HerDevModel = "qwen/qwen3.6-27b"
+$ShouldWarmHerDev = $WarmHerDev.IsPresent -or (-not $SkipHerDevWarmup.IsPresent)
+if ($ShouldWarmHerDev) {
+    Write-Step "warming HerDev model by default for coding/SDTK tasks"
+    Ensure-LmsModelLoaded -ModelId $HerDevModel
+    Assert-LmsModelLoaded -ModelId $HerDevModel
+}
+else {
+    Write-Step "skipping HerDev warm-up by request"
 }
 
 Ensure-DockerContainerStarted -ContainerName $ContainerName
@@ -46,6 +53,9 @@ if (-not $EffectiveProfiles) {
 Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $SharedModel
 if ($ShouldWarmHerVid) {
     Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $HerVidModel
+}
+if ($ShouldWarmHerDev) {
+    Assert-ContainerSeesModel -ContainerName $ContainerName -ModelId $HerDevModel
 }
 Recover-HermesProfiles -ContainerName $ContainerName -Profiles $EffectiveProfiles
 

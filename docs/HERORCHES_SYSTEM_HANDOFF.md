@@ -124,7 +124,7 @@ Current policy:
 
 - preload shared `google/gemma-4-26b-a4b-qat`
 - preload `google/gemma-4-12b-qat` by default to protect HerVid from undersized first auto-load
-- do not preload `qwen/qwen3.6-27b` by default
+- preload `qwen/qwen3.6-27b` by default so HerDev is ready for coding/SDTK tasks
 
 This matters because Hermes `config.yaml` context settings do not override a too-small real LM Studio load.
 
@@ -276,12 +276,13 @@ Critical operational truth:
 
 ### HerDev
 
-HerDev is the SDTK/coding profile. It is intentionally not always warmed.
+HerDev is the SDTK/coding profile. It is now warmed by the standard Windows startup flow.
 
 Operational truth:
 
-- `qwen/qwen3.6-27b` is on-demand to reduce idle VRAM pressure
-- if HerDev is slow or unavailable after reboot, model warmup may simply not have happened yet
+- `Start-HermesStack.ps1` preloads `qwen/qwen3.6-27b` unless `-SkipHerDevWarmup` is set
+- if HerDev is slow or unavailable after reboot, verify LM Studio still has `qwen/qwen3.6-27b` loaded and visible from the container
+- heavy video renders may unload resident LM Studio models to free VRAM, so HerDev can still need re-warm after a render-heavy session
 
 ## 10. Dependency Health Model
 
