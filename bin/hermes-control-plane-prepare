@@ -1,0 +1,33 @@
+#!/usr/bin/env node
+'use strict';
+
+const { DEFAULT_PROJECT_PATH, DEFAULT_TEMPLATE_ROOT } = require('../src/hermesControlPlane');
+const { prepareTemplate } = require('../src/hermesControlPlanePrepare');
+
+function parseArgs(argv) {
+  const args = { template: '', params: '{}', projectPath: DEFAULT_PROJECT_PATH, templateRoot: DEFAULT_TEMPLATE_ROOT, help: false };
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--template' && argv[index + 1]) args.template = argv[++index];
+    else if (arg === '--params' && argv[index + 1]) args.params = argv[++index];
+    else if (arg === '--project-path' && argv[index + 1]) args.projectPath = argv[++index];
+    else if (arg === '--template-root' && argv[index + 1]) args.templateRoot = argv[++index];
+    else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown or incomplete argument: ${arg}`);
+  }
+  return args;
+}
+
+function usage() {
+  console.log('Usage: hermes-control-plane-prepare --template <site_audit|research_brief|status> --params <json>\n\nCreates only an SDTK ledger run and a reference-only registry record. It never dispatches a worker.');
+}
+
+try {
+  const args = parseArgs(process.argv);
+  if (args.help) usage();
+  else if (!args.template) throw new Error('--template is required.');
+  else process.stdout.write(JSON.stringify(prepareTemplate(args.template, args.params, args), null, 2) + '\n');
+} catch (error) {
+  process.stderr.write(JSON.stringify({ status: 'error', error: error.message }, null, 2) + '\n');
+  process.exitCode = 1;
+}

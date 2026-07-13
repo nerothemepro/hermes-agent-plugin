@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+'use strict';
+
+const {
+  DEFAULT_PROJECT_PATH,
+  DEFAULT_TEMPLATE_ROOT,
+  previewTemplate,
+  validateTemplate,
+} = require('../src/hermesControlPlane');
+
+function parseArgs(argv) {
+  const args = { command: '', template: '', params: '{}', projectPath: DEFAULT_PROJECT_PATH, templateRoot: DEFAULT_TEMPLATE_ROOT, help: false };
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!args.command && !arg.startsWith('--')) args.command = arg;
+    else if (arg === '--template' && argv[index + 1]) args.template = argv[++index];
+    else if (arg === '--params' && argv[index + 1]) args.params = argv[++index];
+    else if (arg === '--project-path' && argv[index + 1]) args.projectPath = argv[++index];
+    else if (arg === '--template-root' && argv[index + 1]) args.templateRoot = argv[++index];
+    else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown or incomplete argument: ${arg}`);
+  }
+  return args;
+}
+
+function usage() {
+  console.log(`Hermes Control Plane Phase A\n\nUsage:\n  hermes-control-plane validate --template <site_audit|research_brief|status>\n  hermes-control-plane preview --template <site_audit|research_brief|status> --params '<json>'\n\npreview is read-only and always holds for exact owner approval. It never dispatches a worker.`);
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+  if (args.help || !args.command) return usage();
+  if (!args.template) throw new Error('--template is required.');
+  const options = { projectPath: args.projectPath, templateRoot: args.templateRoot, params: args.params };
+  let result;
+  if (args.command === 'preview') result = previewTemplate(args.template, args.params, options);
+  else if (args.command === 'validate') result = validateTemplate(args.template, options);
+  else throw new Error(`Unsupported command: ${args.command}`);
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  if (result.status === 'error') process.exitCode = 1;
+}
+
+try { main(); } catch (error) { process.stderr.write(JSON.stringify({ status: 'error', error: error.message }, null, 2) + '\n'); process.exitCode = 1; }
