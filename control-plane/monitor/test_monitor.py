@@ -17,6 +17,7 @@ class MonitorContractTests(unittest.TestCase):
         monitor.dedupe_path = monitor.state_dir / "notifications.json"
         monitor.seen_path = monitor.state_dir / "run-statuses.json"
         monitor.bootstrap_path = monitor.state_dir / "bootstrap-complete"
+        monitor.zombie_baseline_path = monitor.state_dir / "zombie-baseline.json"
         monitor.project_path = root
         monitor.interval = 10
         monitor.deadline_ratio = 0.75
@@ -26,6 +27,7 @@ class MonitorContractTests(unittest.TestCase):
         monitor.seen = {}
         monitor.registry.mkdir()
         monitor.state_dir.mkdir()
+        monitor.zombie_baseline_path.write_text(json.dumps({"count": 0}))
         ledger = root / "ledger"
         ledger.mkdir()
         state = ledger / "state.json"
@@ -40,7 +42,7 @@ class MonitorContractTests(unittest.TestCase):
     def test_waiting_gate_notification_only_fires_after_transition(self):
         monitor = self.make_monitor("running_external")
         state_path = Path(next(iter(monitor._registry_records()))["state_path"])
-        with patch.object(monitor, "_run", return_value={"status": "running_external"}):
+        with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_run", return_value={"status": "running_external"}):
             monitor.tick()
             monitor.tick()
         state_path.write_text(json.dumps({"status": "waiting_for_approval", "waiting_gate": "owner_review"}))
@@ -51,11 +53,11 @@ class MonitorContractTests(unittest.TestCase):
 
     def test_completed_external_run_is_the_only_auto_mutation(self):
         monitor = self.make_monitor("running_external")
-        with patch.object(monitor, "_hermes_task_status", side_effect=["running", "done"]), patch.object(monitor, "_run", return_value={"status": "completed"}) as run:
+        with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_hermes_task_status", side_effect=["running", "done"]), patch.object(monitor, "_run", return_value={"status": "completed"}) as run:
             monitor.tick()
             monitor.tick()
             observations = monitor.tick()
-        self.assertEqual(observations[0]["action"], "continue")
+        self.assertEqual(observations[1]["action"], "continue")
         self.assertEqual([call.args[0] for call in run.call_args_list], [
             ["sdtk-agent", "run", "continue"],
         ])

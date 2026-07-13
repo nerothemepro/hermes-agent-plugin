@@ -29,6 +29,7 @@ class Monitor:
         self.dedupe_path = self.state_dir / "notifications.json"
         self.seen_path = self.state_dir / "run-statuses.json"
         self.bootstrap_path = self.state_dir / "bootstrap-complete"
+        self.zombie_baseline_path = self.state_dir / "zombie-baseline.json"
         self.project_path = Path(os.environ.get("SDTK_PROJECT_PATH", "/workspace/hermes-agent-plugin"))
         self.interval = max(1, int(os.environ.get("HERMES_MONITOR_INTERVAL_SECONDS", "10")))
         self.deadline_ratio = float(os.environ.get("HERMES_MONITOR_DEADLINE_RATIO", "0.75"))
@@ -38,6 +39,8 @@ class Monitor:
         self.seen = self._load_json(self.seen_path, {})
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.state_dir, 0o700)
+        if not self.zombie_baseline_path.exists():
+            self._save_json(self.zombie_baseline_path, {"count": self._zombie_count(), "captured_at": utc_now()})
 
     @staticmethod
     def _load_json(path: Path, fallback):
@@ -110,6 +113,41 @@ class Monitor:
         task = payload.get("task", payload)
         return task.get("status") if isinstance(task, dict) else None
 
+    def _zombie_count(self) -> int:
+        result = subprocess.run(["ps", "-eo", "stat,args"], check=False, capture_output=True, text=True, timeout=10)
+        return sum(1 for line in result.stdout.splitlines() if "[hermes] <defunct>" in line)
+
+    def _dispatcher_healthy(self) -> bool:
+        result = subprocess.run(
+            ["bash", "/workspace/hermes-agent-plugin/scripts/herprofile_status.sh", "herorches"],
+            check=False, capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0 and "Gateway is running" in result.stdout
+
+    def _infrastructure_checks(self) -> dict:
+        baseline = self._load_json(self.zombie_baseline_path, {"count": 0})
+        zombies = self._zombie_count()
+        dispatcher_ok = self._dispatcher_healthy()
+        if not dispatcher_ok:
+            self._notify("dispatcher_down", "Hermes dispatcher gateway is unavailable\nprofile: herorches\nrecovery: inspect gateway log, then use the approved gateway restart runbook.")
+        if zombies > int(baseline.get("count", 0)):
+            self._notify("zombie_baseline_exceeded", f"Hermes zombie count increased\nbaseline: {baseline.get('count', 0)}\ncurrent: {zombies}\nrecovery: stop dispatch and inspect supervisor/gateway logs.")
+        return {"dispatcher_healthy": dispatcher_ok, "zombie_count": zombies, "zombie_baseline": baseline.get("count", 0)}
+
+    @staticmethod
+    def _deadline_risk(task: dict, ratio: float) -> bool:
+        submitted = task.get("submitted_at")
+        deadline = task.get("deadline_at")
+        if not submitted or not deadline:
+            return False
+        try:
+            start = datetime.fromisoformat(submitted.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        total = (end - start).total_seconds()
+        return total > 0 and (datetime.now(timezone.utc) - start).total_seconds() >= total * ratio
+
     def _registry_records(self) -> list[dict]:
         records = []
         for path in sorted(self.registry.glob("*.json")):
@@ -128,7 +166,7 @@ class Monitor:
         return self._load_json(Path(record["state_path"]), {})
 
     def tick(self) -> list[dict]:
-        observations = []
+        observations = [{"infrastructure": self._infrastructure_checks()}]
         bootstrap = not self.bootstrap_path.exists()
         for record in self._registry_records():
             run_id = record["run_id"]
@@ -151,6 +189,10 @@ class Monitor:
                 task_id = task.get("external_ids", {}).get("hermes_task_id")
                 external_status = self._hermes_task_status(task_id) if task_id else None
                 observation["external_status"] = external_status
+                if self._deadline_risk(task, self.deadline_ratio):
+                    self._notify(f"{run_id}:deadline_risk", f"SDTK external deadline risk\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect worker progress; do not retry automatically.")
+                if external_status in (None, "ready"):
+                    self._notify(f"{run_id}:external_unclaimed", f"SDTK external task is not actively claimed\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect dispatcher and board queue; do not create a duplicate task.")
                 if external_status in ("done", "blocked", "failed"):
                     continued = self._run(["sdtk-agent", "run", "continue"], run_id)
                     observation["action"] = "continue"
