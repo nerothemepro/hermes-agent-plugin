@@ -27,12 +27,14 @@ class Monitor:
         self.registry = self.hermes_home / "control-plane" / "runs"
         self.state_dir = self.hermes_home / "control-plane" / "monitor"
         self.dedupe_path = self.state_dir / "notifications.json"
+        self.seen_path = self.state_dir / "run-statuses.json"
         self.project_path = Path(os.environ.get("SDTK_PROJECT_PATH", "/workspace/hermes-agent-plugin"))
         self.interval = max(1, int(os.environ.get("HERMES_MONITOR_INTERVAL_SECONDS", "10")))
         self.deadline_ratio = float(os.environ.get("HERMES_MONITOR_DEADLINE_RATIO", "0.75"))
         self.token_env = os.environ.get("HERMES_CONTROL_PLANE_BOT_TOKEN_ENV", "TELEGRAM_BOT_TOKEN")
         self.chat_env = os.environ.get("HERMES_CONTROL_PLANE_NOTIFY_CHAT_ENV", "TELEGRAM_HOME_CHANNEL")
         self.dedupe = self._load_json(self.dedupe_path, {})
+        self.seen = self._load_json(self.seen_path, {})
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.state_dir, 0o700)
 
@@ -97,6 +99,12 @@ class Monitor:
                 records.append(record)
         return records
 
+    def _is_new_status(self, run_id: str, status: str | None) -> bool:
+        previous = self.seen.get(run_id)
+        self.seen[run_id] = status
+        self._save_json(self.seen_path, self.seen)
+        return previous != status
+
     def _state(self, record: dict) -> dict:
         return self._load_json(Path(record["state_path"]), {})
 
@@ -106,6 +114,7 @@ class Monitor:
             run_id = record["run_id"]
             state = self._state(record)
             status = state.get("status") or state.get("run_status")
+            status_changed = self._is_new_status(run_id, status)
             observation = {"run_id": run_id, "status": status, "action": "none"}
             if status == "running_external":
                 result = self._run(["sdtk-agent", "run", "status"], run_id)
@@ -114,18 +123,18 @@ class Monitor:
                     continued = self._run(["sdtk-agent", "run", "continue"], run_id)
                     observation["action"] = "continue"
                     observation["continue_status"] = continued.get("status")
-            elif status == "waiting_for_approval":
+            elif status == "waiting_for_approval" and status_changed:
                 gate = state.get("waiting_gate") or state.get("gate") or "owner_review"
                 self._notify(
                     f"{run_id}:waiting_for_approval:{gate}",
                     f"SDTK run waiting for approval\nrun_id: {run_id}\ngate: {gate}\nAPPROVE GATE {run_id} {gate}",
                 )
-            elif status == "completed":
+            elif status == "completed" and status_changed:
                 self._notify(
                     f"{run_id}:completed",
                     f"SDTK run completed\nrun_id: {run_id}\nreport: {record.get('canonical_report_path', '')}",
                 )
-            elif status in ("failed", "blocked", "cancelled"):
+            elif status in ("failed", "blocked", "cancelled") and status_changed:
                 self._notify(f"{run_id}:failure:{status}", f"SDTK run requires attention\nrun_id: {run_id}\nstatus: {status}")
             observations.append(observation)
         return observations

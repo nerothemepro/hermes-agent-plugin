@@ -15,13 +15,16 @@ class MonitorContractTests(unittest.TestCase):
         monitor.registry = root / "runs"
         monitor.state_dir = root / "monitor"
         monitor.dedupe_path = monitor.state_dir / "notifications.json"
+        monitor.seen_path = monitor.state_dir / "run-statuses.json"
         monitor.project_path = root
         monitor.interval = 10
         monitor.deadline_ratio = 0.75
         monitor.token_env = "TEST_TOKEN"
         monitor.chat_env = "TEST_CHAT"
         monitor.dedupe = {}
+        monitor.seen = {}
         monitor.registry.mkdir()
+        monitor.state_dir.mkdir()
         ledger = root / "ledger"
         ledger.mkdir()
         state = ledger / "state.json"
@@ -33,12 +36,12 @@ class MonitorContractTests(unittest.TestCase):
         }))
         return monitor
 
-    def test_waiting_gate_notification_is_deduplicated(self):
+    def test_waiting_gate_notification_only_fires_on_transition(self):
         monitor = self.make_monitor("waiting_for_approval")
         with patch.object(monitor, "_notify") as notify:
             monitor.tick()
             monitor.tick()
-        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(notify.call_count, 1)
         self.assertEqual(notify.call_args[0][0], "run_test:waiting_for_approval:owner_review")
 
     def test_completed_external_run_is_the_only_auto_mutation(self):
