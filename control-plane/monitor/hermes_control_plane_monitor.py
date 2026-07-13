@@ -135,8 +135,13 @@ class Monitor:
             state = self._state(record)
             run_status = state.get("status") or state.get("run_status")
             waiting_task_id = state.get("waiting_task_id")
-            waiting_task = state.get("tasks", {}).get(waiting_task_id, {})
-            status = waiting_task.get("status") if run_status == "running" and waiting_task_id else run_status
+            tasks = state.get("tasks", {})
+            waiting_task = tasks.get(waiting_task_id, {}) if waiting_task_id else {}
+            if run_status == "running" and not waiting_task:
+                active = [(task_id, task) for task_id, task in tasks.items() if task.get("status") == "running_external"]
+                if len(active) == 1:
+                    waiting_task_id, waiting_task = active[0]
+            status = waiting_task.get("status") if run_status == "running" and waiting_task else run_status
             status_changed = self._is_new_status(run_id, status)
             observation = {"run_id": run_id, "status": status, "action": "none"}
             if bootstrap:
