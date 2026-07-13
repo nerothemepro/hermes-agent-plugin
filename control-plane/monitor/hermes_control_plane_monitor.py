@@ -28,6 +28,7 @@ class Monitor:
         self.state_dir = self.hermes_home / "control-plane" / "monitor"
         self.dedupe_path = self.state_dir / "notifications.json"
         self.seen_path = self.state_dir / "run-statuses.json"
+        self.bootstrap_path = self.state_dir / "bootstrap-complete"
         self.project_path = Path(os.environ.get("SDTK_PROJECT_PATH", "/workspace/hermes-agent-plugin"))
         self.interval = max(1, int(os.environ.get("HERMES_MONITOR_INTERVAL_SECONDS", "10")))
         self.deadline_ratio = float(os.environ.get("HERMES_MONITOR_DEADLINE_RATIO", "0.75"))
@@ -110,13 +111,16 @@ class Monitor:
 
     def tick(self) -> list[dict]:
         observations = []
+        bootstrap = not self.bootstrap_path.exists()
         for record in self._registry_records():
             run_id = record["run_id"]
             state = self._state(record)
             status = state.get("status") or state.get("run_status")
             status_changed = self._is_new_status(run_id, status)
             observation = {"run_id": run_id, "status": status, "action": "none"}
-            if status == "running_external":
+            if bootstrap:
+                observation["action"] = "baseline_only"
+            elif status == "running_external":
                 result = self._run(["sdtk-agent", "run", "status"], run_id)
                 observation["status_result"] = result.get("status")
                 if result.get("status") in ("completed", "waiting_for_approval"):
@@ -137,6 +141,9 @@ class Monitor:
             elif status in ("failed", "blocked", "cancelled") and status_changed:
                 self._notify(f"{run_id}:failure:{status}", f"SDTK run requires attention\nrun_id: {run_id}\nstatus: {status}")
             observations.append(observation)
+        if bootstrap:
+            self.bootstrap_path.write_text(utc_now() + "\n", encoding="utf-8")
+            os.chmod(self.bootstrap_path, 0o600)
         return observations
 
     def run_forever(self) -> None:
