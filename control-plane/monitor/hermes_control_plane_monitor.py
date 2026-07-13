@@ -92,6 +92,24 @@ class Monitor:
         self.dedupe[key] = hashlib.sha256(text.encode()).hexdigest()
         self._save_json(self.dedupe_path, self.dedupe)
 
+    def _hermes_task_status(self, task_id: str) -> str | None:
+        result = subprocess.run(
+            ["/workspace/.venvs/hermes-agent/bin/hermes", "kanban", "show", task_id, "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env={k: v for k, v in os.environ.items() if k != "HERMES_KANBAN_HOME"},
+        )
+        if result.returncode != 0:
+            return None
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        task = payload.get("task", payload)
+        return task.get("status") if isinstance(task, dict) else None
+
     def _registry_records(self) -> list[dict]:
         records = []
         for path in sorted(self.registry.glob("*.json")):
@@ -121,9 +139,11 @@ class Monitor:
             if bootstrap:
                 observation["action"] = "baseline_only"
             elif status == "running_external":
-                result = self._run(["sdtk-agent", "run", "status"], run_id)
-                observation["status_result"] = result.get("status")
-                if result.get("status") in ("completed", "waiting_for_approval"):
+                task = state.get("tasks", {}).get(state.get("waiting_task_id"), {})
+                task_id = task.get("external_ids", {}).get("hermes_task_id")
+                external_status = self._hermes_task_status(task_id) if task_id else None
+                observation["external_status"] = external_status
+                if external_status in ("done", "blocked", "failed"):
                     continued = self._run(["sdtk-agent", "run", "continue"], run_id)
                     observation["action"] = "continue"
                     observation["continue_status"] = continued.get("status")

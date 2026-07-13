@@ -29,7 +29,7 @@ class MonitorContractTests(unittest.TestCase):
         ledger = root / "ledger"
         ledger.mkdir()
         state = ledger / "state.json"
-        state.write_text(json.dumps({"status": status}))
+        state.write_text(json.dumps({"status": status, "waiting_task_id": "worker", "tasks": {"worker": {"external_ids": {"hermes_task_id": "t_test"}}}}))
         (monitor.registry / "run_test.json").write_text(json.dumps({
             "run_id": "run_test",
             "state_path": str(state),
@@ -51,14 +51,12 @@ class MonitorContractTests(unittest.TestCase):
 
     def test_completed_external_run_is_the_only_auto_mutation(self):
         monitor = self.make_monitor("running_external")
-        with patch.object(monitor, "_run", side_effect=[{"status": "running_external"}, {"status": "completed"}, {"status": "completed"}]) as run:
+        with patch.object(monitor, "_hermes_task_status", side_effect=["running", "done"]), patch.object(monitor, "_run", return_value={"status": "completed"}) as run:
             monitor.tick()
             monitor.tick()
             observations = monitor.tick()
         self.assertEqual(observations[0]["action"], "continue")
         self.assertEqual([call.args[0] for call in run.call_args_list], [
-            ["sdtk-agent", "run", "status"],
-            ["sdtk-agent", "run", "status"],
             ["sdtk-agent", "run", "continue"],
         ])
 
