@@ -135,7 +135,7 @@ class Monitor:
         return {"dispatcher_healthy": dispatcher_ok, "zombie_count": zombies, "zombie_baseline": baseline.get("count", 0)}
 
     @staticmethod
-    def _deadline_risk(task: dict, ratio: float) -> bool:
+    def _deadline_risk(task: dict, ratio: float, interval: int) -> bool:
         submitted = task.get("submitted_at")
         deadline = task.get("deadline_at")
         if not submitted or not deadline:
@@ -146,7 +146,8 @@ class Monitor:
         except ValueError:
             return False
         total = (end - start).total_seconds()
-        return total > 0 and (datetime.now(timezone.utc) - start).total_seconds() >= total * ratio
+        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        return total > 0 and elapsed + interval >= total * ratio
 
     def _registry_records(self) -> list[dict]:
         records = []
@@ -189,7 +190,7 @@ class Monitor:
                 task_id = task.get("external_ids", {}).get("hermes_task_id")
                 external_status = self._hermes_task_status(task_id) if task_id else None
                 observation["external_status"] = external_status
-                if self._deadline_risk(task, self.deadline_ratio):
+                if self._deadline_risk(task, self.deadline_ratio, self.interval):
                     self._notify(f"{run_id}:deadline_risk", f"SDTK external deadline risk\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect worker progress; do not retry automatically.")
                 if external_status in (None, "ready"):
                     self._notify(f"{run_id}:external_unclaimed", f"SDTK external task is not actively claimed\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect dispatcher and board queue; do not create a duplicate task.")

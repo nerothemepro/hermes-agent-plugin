@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,6 +62,14 @@ class MonitorContractTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in run.call_args_list], [
             ["sdtk-agent", "run", "continue"],
         ])
+
+    def test_deadline_risk_looks_ahead_one_tick(self):
+        now = datetime.now(timezone.utc)
+        task = {
+            "submitted_at": (now - timedelta(seconds=40)).isoformat(),
+            "deadline_at": (now + timedelta(seconds=20)).isoformat(),
+        }
+        self.assertTrue(Monitor._deadline_risk(task, 0.75, 10))
 
     def test_monitor_rejects_unallowlisted_sdtk_action(self):
         monitor = self.make_monitor("completed")
