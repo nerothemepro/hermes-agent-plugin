@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes Control Plane Phase B monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 /workspace/hermes-agent-plugin/control-plane/monitor/hermes_control_plane_monitor.py
+Environment=HERMES_HOME=/opt/data/hermes
+Environment=HERMES_CONTROL_PLANE_BOT_TOKEN_ENV=TELEGRAM_BOT_TOKEN
+Environment=HERMES_CONTROL_PLANE_NOTIFY_CHAT_ENV=TELEGRAM_HOME_CHANNEL
+Environment=HERMES_MONITOR_INTERVAL_SECONDS=10
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/data/hermes/control-plane/monitor
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

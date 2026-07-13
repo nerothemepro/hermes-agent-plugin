@@ -1,0 +1,35 @@
+{
+  "schema_version": "hermes.control-plane-template.v1",
+  "template_id": "research_brief",
+  "version": "r1",
+  "description": "Bounded, source-backed public research brief with an owner review gate.",
+  "allowed_profile": "herresearch",
+  "cost_band": "low",
+  "side_effects": {
+    "allowed": ["public_read_only_browsing", "kanban_comment", "kanban_complete_or_block"],
+    "forbidden": ["login", "repository_mutation", "website_mutation", "message_send", "child_dispatch", "wiki_write", "publish"]
+  },
+  "params": {
+    "topic": {
+      "type": "bounded_text",
+      "min_length": 3,
+      "max_length": 240,
+      "required": true
+    }
+  },
+  "runtime": {
+    "deadline_ms": 1800000,
+    "board": "default",
+    "cancel_action": "reclaim"
+  },
+  "human_gate": {
+    "id": "owner_review",
+    "prompt": "Owner reviews the bounded research brief before closing the run."
+  },
+  "cleanup_policy": "Capture canonical evidence first, then archive only the disposable Kanban card created for this run.",
+  "evidence_expectations": [
+    "Brief distinguishes verified facts from unknowns.",
+    "Sources are public and cited by URL.",
+    "No unsourced claim, credential, cookie, token, or login-required content in evidence."
+  ]
+}

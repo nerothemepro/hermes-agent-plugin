@@ -1,0 +1,30 @@
+{
+  "schema_version": "hermes.control-plane-template.v1",
+  "template_id": "status",
+  "version": "r1",
+  "description": "Read-only status summary grounded only in one explicit canonical SDTK ledger/report path.",
+  "allowed_profile": "herorches",
+  "cost_band": "low",
+  "side_effects": {
+    "allowed": ["read_explicit_local_ledger_paths", "kanban_comment", "kanban_complete_or_block"],
+    "forbidden": ["public_browsing", "login", "repository_mutation", "website_mutation", "message_send", "child_dispatch", "wiki_write", "publish"]
+  },
+  "params": {
+    "run_id": {
+      "type": "run_id",
+      "required": true
+    }
+  },
+  "runtime": {
+    "deadline_ms": 600000,
+    "board": "default",
+    "cancel_action": "reclaim"
+  },
+  "human_gate": null,
+  "cleanup_policy": "Capture canonical evidence first, then archive only the disposable Kanban card created for this run.",
+  "evidence_expectations": [
+    "Every status claim cites the explicit state.json or final_report.md path.",
+    "Unknown or missing state is reported as unknown; never inferred.",
+    "No secret or environment value is included."
+  ]
+}

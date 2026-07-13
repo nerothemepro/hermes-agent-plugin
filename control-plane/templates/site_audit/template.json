@@ -1,0 +1,34 @@
+{
+  "schema_version": "hermes.control-plane-template.v1",
+  "template_id": "site_audit",
+  "version": "r1",
+  "description": "Bounded public SDTK site audit with an owner review gate.",
+  "allowed_profile": "herresearch",
+  "cost_band": "low",
+  "side_effects": {
+    "allowed": ["public_read_only_browsing", "kanban_comment", "kanban_complete_or_block"],
+    "forbidden": ["login", "repository_mutation", "website_mutation", "message_send", "child_dispatch", "wiki_write", "publish"]
+  },
+  "params": {
+    "scope": {
+      "type": "enum",
+      "values": ["sdtk_public_web"],
+      "default": "sdtk_public_web"
+    }
+  },
+  "runtime": {
+    "deadline_ms": 1800000,
+    "board": "default",
+    "cancel_action": "reclaim"
+  },
+  "human_gate": {
+    "id": "owner_review",
+    "prompt": "Owner reviews the public-site audit findings before closing the run."
+  },
+  "cleanup_policy": "Capture canonical evidence first, then archive only the disposable Kanban card created for this run.",
+  "evidence_expectations": [
+    "Each finding includes URL, section or heading, concise evidence, severity, and recommended correction.",
+    "At most five high-confidence findings.",
+    "No credential, cookie, token, or login-required content in evidence."
+  ]
+}
