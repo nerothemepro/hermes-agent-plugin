@@ -58,6 +58,7 @@ class MonitorContractTests(unittest.TestCase):
         self.assertEqual(observations[0]["action"], "continue")
         self.assertEqual([call.args[0] for call in run.call_args_list], [
             ["sdtk-agent", "run", "status"],
+            ["sdtk-agent", "run", "status"],
             ["sdtk-agent", "run", "continue"],
         ])
 
