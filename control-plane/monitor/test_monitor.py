@@ -71,6 +71,18 @@ class MonitorContractTests(unittest.TestCase):
         }
         self.assertTrue(Monitor._deadline_risk(task, 0.75, 10))
 
+    def test_notification_state_records_only_digest_and_timestamp(self):
+        monitor = self.make_monitor("completed")
+        monitor.token_env = "TEST_TOKEN"
+        monitor.chat_env = "TEST_CHAT"
+        with patch.dict("os.environ", {"TEST_TOKEN": "hidden", "TEST_CHAT": "123"}, clear=False), patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.status = 200
+            monitor._notify("deadline", "safe alert")
+        stored = monitor.dedupe["deadline"]
+        self.assertEqual(set(stored), {"hash", "sent_at"})
+        self.assertEqual(len(stored["hash"]), 64)
+        self.assertNotIn("hidden", json.dumps(stored))
+
     def test_monitor_rejects_unallowlisted_sdtk_action(self):
         monitor = self.make_monitor("completed")
         with self.assertRaises(ValueError):

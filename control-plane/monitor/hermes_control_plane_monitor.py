@@ -78,7 +78,10 @@ class Monitor:
         return payload
 
     def _notify(self, key: str, text: str) -> None:
-        if self.dedupe.get(key) == hashlib.sha256(text.encode()).hexdigest():
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        existing = self.dedupe.get(key)
+        existing_digest = existing.get("hash") if isinstance(existing, dict) else existing
+        if existing_digest == digest:
             return
         token = os.environ.get(self.token_env)
         chat_id = os.environ.get(self.chat_env)
@@ -92,8 +95,10 @@ class Monitor:
         with urllib.request.urlopen(request, timeout=15) as response:
             if response.status >= 300:
                 raise RuntimeError(f"Telegram notification failed with HTTP {response.status}")
-        self.dedupe[key] = hashlib.sha256(text.encode()).hexdigest()
+        sent_at = utc_now()
+        self.dedupe[key] = {"hash": digest, "sent_at": sent_at}
         self._save_json(self.dedupe_path, self.dedupe)
+        print(json.dumps({"event": "notification_sent", "key": key, "sent_at": sent_at}, sort_keys=True), flush=True)
 
     def _hermes_task_status(self, task_id: str) -> str | None:
         result = subprocess.run(
