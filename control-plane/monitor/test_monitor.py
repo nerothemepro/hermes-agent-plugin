@@ -29,7 +29,7 @@ class MonitorContractTests(unittest.TestCase):
         ledger = root / "ledger"
         ledger.mkdir()
         state = ledger / "state.json"
-        state.write_text(json.dumps({"status": status, "waiting_task_id": "worker", "tasks": {"worker": {"external_ids": {"hermes_task_id": "t_test"}}}}))
+        state.write_text(json.dumps({"status": "running" if status == "running_external" else status, "waiting_task_id": "worker", "tasks": {"worker": {"status": status, "external_ids": {"hermes_task_id": "t_test"}}}}))
         (monitor.registry / "run_test.json").write_text(json.dumps({
             "run_id": "run_test",
             "state_path": str(state),

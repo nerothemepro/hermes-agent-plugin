@@ -133,13 +133,16 @@ class Monitor:
         for record in self._registry_records():
             run_id = record["run_id"]
             state = self._state(record)
-            status = state.get("status") or state.get("run_status")
+            run_status = state.get("status") or state.get("run_status")
+            waiting_task_id = state.get("waiting_task_id")
+            waiting_task = state.get("tasks", {}).get(waiting_task_id, {})
+            status = waiting_task.get("status") if run_status == "running" and waiting_task_id else run_status
             status_changed = self._is_new_status(run_id, status)
             observation = {"run_id": run_id, "status": status, "action": "none"}
             if bootstrap:
                 observation["action"] = "baseline_only"
             elif status == "running_external":
-                task = state.get("tasks", {}).get(state.get("waiting_task_id"), {})
+                task = waiting_task
                 task_id = task.get("external_ids", {}).get("hermes_task_id")
                 external_status = self._hermes_task_status(task_id) if task_id else None
                 observation["external_status"] = external_status
