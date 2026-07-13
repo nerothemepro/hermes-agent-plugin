@@ -1,0 +1,61 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from hermes_control_plane_monitor import Monitor
+
+
+class MonitorContractTests(unittest.TestCase):
+    def make_monitor(self, status):
+        root = Path(tempfile.mkdtemp())
+        monitor = object.__new__(Monitor)
+        monitor.hermes_home = root
+        monitor.registry = root / "runs"
+        monitor.state_dir = root / "monitor"
+        monitor.dedupe_path = monitor.state_dir / "notifications.json"
+        monitor.project_path = root
+        monitor.interval = 10
+        monitor.deadline_ratio = 0.75
+        monitor.token_env = "TEST_TOKEN"
+        monitor.chat_env = "TEST_CHAT"
+        monitor.dedupe = {}
+        monitor.registry.mkdir()
+        ledger = root / "ledger"
+        ledger.mkdir()
+        state = ledger / "state.json"
+        state.write_text(json.dumps({"status": status}))
+        (monitor.registry / "run_test.json").write_text(json.dumps({
+            "run_id": "run_test",
+            "state_path": str(state),
+            "canonical_report_path": str(ledger / "reports" / "final_report.md"),
+        }))
+        return monitor
+
+    def test_waiting_gate_notification_is_deduplicated(self):
+        monitor = self.make_monitor("waiting_for_approval")
+        with patch.object(monitor, "_notify") as notify:
+            monitor.tick()
+            monitor.tick()
+        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(notify.call_args[0][0], "run_test:waiting_for_approval:owner_review")
+
+    def test_completed_external_run_is_the_only_auto_mutation(self):
+        monitor = self.make_monitor("running_external")
+        with patch.object(monitor, "_run", side_effect=[{"status": "completed"}, {"status": "completed"}]) as run:
+            observations = monitor.tick()
+        self.assertEqual(observations[0]["action"], "continue")
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            ["sdtk-agent", "run", "status"],
+            ["sdtk-agent", "run", "continue"],
+        ])
+
+    def test_monitor_rejects_unallowlisted_sdtk_action(self):
+        monitor = self.make_monitor("completed")
+        with self.assertRaises(ValueError):
+            monitor._run(["sdtk-agent", "gate", "approve"], "run_test")
+
+
+if __name__ == "__main__":
+    unittest.main()
