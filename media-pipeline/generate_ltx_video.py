@@ -96,7 +96,8 @@ ANIMATION_EXTRA_NEGATIVE = (
 
 # interp = RIFE frame multiplier (1 = off). 8fps x 3 = 24fps cinematic output.
 MODE_PRESETS: dict[str, dict[str, Any]] = {
-    "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False, "interp": 1},
+    # test: enough steps/interp for visual quality evaluation; not for production
+    "test": {"width": 512, "height": 320, "duration": 2, "fps": 8, "steps": 8, "prompt_enhance": False, "interp": 3},
     "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False, "interp": 3},
     # quality envelope proven on RTX 3090: 768x512 @ 8fps native, then RIFE x3 ->
     # 24fps in post. Steps raised 20->26 for sharper in-motion facial detail.
@@ -180,6 +181,10 @@ def run_keyframe_generator(args: argparse.Namespace, env: dict[str, str], base: 
         ])
     if getattr(args, "keyframe_seed", None) is not None:
         cmd.extend(["--seed", str(args.keyframe_seed)])
+    # FLUX.1-Redux reference: condition this shot's fresh keyframe on the approved
+    # keyframe so the character/style stays consistent across shots.
+    if getattr(args, "redux_reference", "") and not use_animagine_path:
+        cmd.extend(["--redux-reference", args.redux_reference])
     if Path(args.env_file).exists():
         cmd.extend(["--env-file", args.env_file])
     proc = subprocess.run(
@@ -535,6 +540,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate an LTX-2.3 I2V video via local ComfyUI")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--input-image", dest="input_image", default="")
+    parser.add_argument("--redux-reference", dest="redux_reference", default="",
+                        help="Approved keyframe passed to the keyframe generator as a FLUX.1-Redux reference so shots keep a consistent character/style. Only used when this shot generates its own keyframe (no --input-image).")
     parser.add_argument("--mode", choices=sorted(MODE_PRESETS), default="test")
     parser.add_argument("--style", choices=["realistic", "product", "travel", "social_ad", "anime"], default="realistic")
     parser.add_argument("--keyframe-engine", choices=["auto", "flux", "animagine"], default="auto")
