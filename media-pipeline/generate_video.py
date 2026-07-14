@@ -32,6 +32,7 @@ def error_reason(exc: BaseException) -> str:
 PROJECT_DIR = Path("/workspace/projects/media-pipeline")
 DEFAULT_ENV_FILE = "/opt/data/hermes/media-pipeline.env"
 DEFAULT_FLUX_WORKFLOW = str(PROJECT_DIR / "workflows/flux_keyframe_api.json")
+DEFAULT_FLUX_REDUX_WORKFLOW = str(PROJECT_DIR / "workflows/flux_keyframe_redux_api.json")
 DEFAULT_ANIMAGINE_WORKFLOW = str(PROJECT_DIR / "workflows/animagine_keyframe_api.json")
 DEFAULT_WAN_WORKFLOW = str(PROJECT_DIR / "workflows/wan_i2v_api.json")
 DEFAULT_WAN_FLF_WORKFLOW = str(PROJECT_DIR / "workflows/wan_flf2v_api.json")
@@ -844,6 +845,41 @@ def patch_flux_workflow(workflow: dict[str, Any], prompt: str, negative_prompt: 
     return patched
 
 
+def redux_models_available(object_info: dict[str, Any], env: dict[str, str]) -> bool:
+    """True only if both the Redux style model and its sigclip vision model are
+    present in the live ComfyUI (checked via /object_info combo lists). Lets the
+    pipeline auto-fall-back to the plain flux keyframe before the files land."""
+    style_model = cfg(env, "FLUX_REDUX_STYLE_MODEL", "flux1-redux-dev.safetensors")
+    clip_vision = cfg(env, "FLUX_REDUX_CLIP_VISION", "sigclip_vision_patch14_384.safetensors")
+
+    def _combo(node: str, key: str) -> list:
+        inp = object_info.get(node, {}).get("input", {})
+        combos = {**inp.get("required", {}), **inp.get("optional", {})}
+        val = combos.get(key)
+        return val[0] if isinstance(val, list) and val and isinstance(val[0], list) else []
+
+    return style_model in _combo("StyleModelLoader", "style_model_name") and \
+        clip_vision in _combo("CLIPVisionLoader", "clip_name")
+
+
+def patch_flux_redux_workflow(workflow: dict[str, Any], prompt: str, negative_prompt: str, width: int, height: int, steps: int, seed: int, filename_prefix: str, redux_image_name: str, env: dict[str, str]) -> dict[str, Any]:
+    """Flux keyframe with a FLUX.1-Redux reference: shots 2+ inherit the approved
+    keyframe's character/style via CLIP-Vision + StyleModelApply conditioning,
+    while the text prompt still drives the new pose/scene. Falls back to the
+    plain flux patch for all the shared params, then wires the Redux nodes."""
+    patched = patch_flux_workflow(workflow, prompt, negative_prompt, width, height, steps, seed, filename_prefix, env)
+    if not set_node_input(patched, "LoadImage", "image", redux_image_name):
+        raise PipelineError("redux workflow has no LoadImage node to patch the reference image")
+    patch_all_node_input(patched, "StyleModelLoader", {"style_model_name": cfg(env, "FLUX_REDUX_STYLE_MODEL", "flux1-redux-dev.safetensors")})
+    patch_all_node_input(patched, "CLIPVisionLoader", {"clip_name": cfg(env, "FLUX_REDUX_CLIP_VISION", "sigclip_vision_patch14_384.safetensors")})
+    # strength<1 keeps identity strong but still lets the shot prompt move the
+    # pose/scene; strength=1.0 tends to clone the reference and ignore the prompt.
+    set_node_input(patched, "StyleModelApply", "strength", float(cfg(env, "FLUX_REDUX_STRENGTH", "0.6")))
+    set_node_input(patched, "StyleModelApply", "strength_type", cfg(env, "FLUX_REDUX_STRENGTH_TYPE", "multiply"))
+    set_node_input(patched, "CLIPVisionEncode", "crop", cfg(env, "FLUX_REDUX_CROP", "center"))
+    return patched
+
+
 def patch_wan_model_loaders(workflow: dict[str, Any], env: dict[str, str]) -> None:
     patch_all_node_input(workflow, "UNETLoader", {"unet_name": cfg(env, "WAN_UNET_NAME", "wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors")})
     patch_all_node_input(workflow, "CLIPLoader", {"clip_name": cfg(env, "WAN_CLIP_NAME", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"), "type": "wan"})
@@ -1076,12 +1112,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
         keyframe_workflow_name = "animagine_keyframe_api"
     else:
-        keyframe_workflow_path = flux_workflow_path
         keyframe_prompt = prompt_used
         keyframe_negative = negative
-        keyframe_workflow_template = load_workflow(keyframe_workflow_path)
-        keyframe_workflow = patch_flux_workflow(keyframe_workflow_template, keyframe_prompt, keyframe_negative, width, height, flux_steps, seed, f"hermes_keyframe/{base}", env)
-        keyframe_workflow_name = "flux_keyframe_api"
+        # FLUX.1-Redux path: when the sequence hands us the approved keyframe as a
+        # reference, condition each new shot's keyframe on it so the character and
+        # style stay consistent across shots (the text prompt still drives pose/scene).
+        redux_ref = getattr(args, "redux_reference", "") or ""
+        use_redux = bool(redux_ref) and cfg(env, "LTX_REDUX_KEYFRAME", "1") != "0"
+        if use_redux and not Path(redux_ref).is_file():
+            warnings.append(f"redux reference not found, using plain flux keyframe: {redux_ref}")
+            use_redux = False
+        if use_redux and not redux_models_available(object_info, env):
+            warnings.append("FLUX.1-Redux models not installed in ComfyUI (style_models/clip_vision) — using plain flux keyframe")
+            use_redux = False
+        if use_redux:
+            keyframe_workflow_path = args.flux_redux_workflow
+            if keyframe_workflow_path == DEFAULT_FLUX_REDUX_WORKFLOW:
+                keyframe_workflow_path = cfg(env, "FLUX_REDUX_WORKFLOW_PATH", DEFAULT_FLUX_REDUX_WORKFLOW)
+            redux_upload_name = f"hermes_redux_ref_{base}{Path(redux_ref).suffix.lower() or '.png'}"
+            upload_image(comfy_url, redux_ref, redux_upload_name)
+            keyframe_workflow_template = load_workflow(keyframe_workflow_path)
+            keyframe_workflow = patch_flux_redux_workflow(keyframe_workflow_template, keyframe_prompt, keyframe_negative, width, height, flux_steps, seed, f"hermes_keyframe/{base}", redux_upload_name, env)
+            keyframe_workflow_name = "flux_keyframe_redux_api"
+        else:
+            keyframe_workflow_path = flux_workflow_path
+            keyframe_workflow_template = load_workflow(keyframe_workflow_path)
+            keyframe_workflow = patch_flux_workflow(keyframe_workflow_template, keyframe_prompt, keyframe_negative, width, height, flux_steps, seed, f"hermes_keyframe/{base}", env)
+            keyframe_workflow_name = "flux_keyframe_api"
     keyframe_meta = keyframe_metadata(keyframe_engine, keyframe_workflow_path, keyframe_workflow, width, height)
     errors = validate_workflow_node_classes(keyframe_workflow, object_info, keyframe_workflow_name) + validate_workflow_models(keyframe_workflow, object_info, keyframe_workflow_name)
     if not args.keyframe_only:
@@ -1240,6 +1297,8 @@ def main() -> int:
     parser.add_argument("--control-mode", choices=["i2v_last_frame", "flf2v"], default="i2v_last_frame")
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
     parser.add_argument("--flux-workflow", default=DEFAULT_FLUX_WORKFLOW)
+    parser.add_argument("--flux-redux-workflow", default=DEFAULT_FLUX_REDUX_WORKFLOW)
+    parser.add_argument("--redux-reference", dest="redux_reference", default="", help="Approved keyframe image. When set (and Redux models are installed), the keyframe is generated with FLUX.1-Redux conditioning on this reference so the character/style matches across shots. Ignored unless --keyframe-only and no --input-image.")
     parser.add_argument("--animagine-workflow", default=DEFAULT_ANIMAGINE_WORKFLOW)
     parser.add_argument("--wan-workflow", default=DEFAULT_WAN_WORKFLOW)
     parser.add_argument("--wan-flf-workflow", default=DEFAULT_WAN_FLF_WORKFLOW)

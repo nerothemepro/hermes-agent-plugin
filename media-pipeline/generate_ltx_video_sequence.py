@@ -231,6 +231,10 @@ def render_shot(args: argparse.Namespace, prompt: str, index: int, total: int, i
         cmd.extend(["--keyframe-seed", str(args.keyframe_seed)])
     if input_image:
         cmd.extend(["--input-image", input_image])
+    elif args.input_image:
+        # This shot generates its own keyframe: condition it on the approved
+        # sequence keyframe via FLUX.1-Redux so the character stays consistent.
+        cmd.extend(["--redux-reference", args.input_image])
     proc = subprocess.run(cmd, cwd=str(PROJECT_DIR), text=True, capture_output=True, timeout=args.per_shot_timeout_seconds, check=False)
     payload = parse_pipeline_json(proc.stdout, proc.stderr)
     if proc.returncode != 0 or payload.get("status") != "completed":
