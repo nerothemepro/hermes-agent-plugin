@@ -72,6 +72,15 @@ DEFAULT_INTERP_MODEL = "rife_v4.26.safetensors"
 # node + codeformer model in the ComfyUI container; gated OFF by default via the
 # LTX_FACE_RESTORE env so renders never break when the node is absent.
 DEFAULT_FACE_RESTORE_MODEL = "codeformer.pth"
+
+# Anime detail restoration. CodeFormer only works on real human faces, so it is
+# disabled for anime/cartoon content — leaving motion-blurred anime faces with no
+# restorer (the "cat face melts during the leap" problem). RealESRGAN
+# AnimeVideo-v3 is an anime-specialised per-frame upscaler that re-injects
+# line/detail; run it right after VAE decode (before RIFE) so interpolation works
+# on already-sharpened frames. Gated on the model being installed in ComfyUI so
+# renders never break when it is absent (auto-falls back to no restore).
+DEFAULT_ANIME_UPSCALE_MODEL = "realesr-animevideov3.pth"
 DEFAULT_FACE_DETECTION = "retinaface_resnet50"
 # CodeFormer fidelity: 0=max restoration (sharper, may drift identity),
 # 1=max fidelity to input. 0.5 balances sharpness vs identity for video.
@@ -250,6 +259,7 @@ def patch_ltx_workflow(
     env: dict[str, str],
     interp_multiplier: int = 1,
     face_restore: bool = False,
+    anime_upscale: bool = False,
 ) -> dict[str, Any]:
     patched = copy.deepcopy(workflow)
     checkpoint = cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT)
@@ -283,14 +293,41 @@ def patch_ltx_workflow(
     set_node_input(patched, "VAEDecodeTiled", "temporal_overlap", int(cfg(env, "LTX_VAE_TEMPORAL_OVERLAP", "8")))
     create_fps = float(fps)
     mult = int(interp_multiplier or 1)
-    if mult > 1 or face_restore:
+    if mult > 1 or face_restore or anime_upscale:
         decode_id = next((nid for nid, _ in iter_nodes(patched, "VAEDecodeTiled")), None)
         create_id = next((nid for nid, _ in iter_nodes(patched, "CreateVideo")), None)
         if decode_id is None or create_id is None:
             raise PipelineError("LTX workflow missing VAEDecodeTiled/CreateVideo; cannot add post-decode nodes")
-        # frames_source walks the post-decode chain: decode -> [face restore] ->
-        # [RIFE] -> CreateVideo. Each enabled stage consumes the previous output.
+        # frames_source walks the post-decode chain: decode -> [anime upscale] ->
+        # [face restore] -> [RIFE] -> CreateVideo. Each enabled stage consumes the
+        # previous output.
         frames_source = decode_id
+        if anime_upscale:
+            # Anime detail restore: RealESRGAN AnimeVideo-v3 upscales 4x (re-drawing
+            # sharp lines / un-blurring motion-softened anime faces), then scale back
+            # to the target resolution so the sharpened detail is baked in without
+            # changing the output size (LTX_ANIME_UPSCALE_FACTOR>1 keeps it larger).
+            au_loader, au_up, au_scale = "anime_upscale_loader", "anime_upscale", "anime_downscale"
+            patched[au_loader] = {
+                "class_type": "UpscaleModelLoader",
+                "inputs": {"model_name": cfg(env, "LTX_ANIME_UPSCALE_MODEL", DEFAULT_ANIME_UPSCALE_MODEL)},
+            }
+            patched[au_up] = {
+                "class_type": "ImageUpscaleWithModel",
+                "inputs": {"upscale_model": [au_loader, 0], "image": [frames_source, 0]},
+            }
+            back = float(cfg(env, "LTX_ANIME_UPSCALE_FACTOR", "1.0"))
+            patched[au_scale] = {
+                "class_type": "ImageScale",
+                "inputs": {
+                    "image": [au_up, 0],
+                    "upscale_method": cfg(env, "LTX_ANIME_DOWNSCALE_METHOD", "bicubic"),
+                    "width": int(width * back),
+                    "height": int(height * back),
+                    "crop": "disabled",
+                },
+            }
+            frames_source = au_scale
         if face_restore:
             # Tier 2: per-frame CodeFormer face restoration (before RIFE so fewer
             # frames are processed and interpolation softens identity flicker).
@@ -480,6 +517,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     face_restore = bool_arg(cfg(env, "LTX_FACE_RESTORE", "0")) and not animation
     if animation:
         warnings.append("animation detected: CodeFormer face-restore disabled and human-blocking negatives added")
+    # Anime detail restore replaces CodeFormer for animation content: only when the
+    # RealESRGAN anime model is actually installed (auto-detected via object_info),
+    # else fall back silently to no restore.
+    anime_upscale = False
+    if animation and bool_arg(cfg(env, "LTX_ANIME_UPSCALE", "1")):
+        anime_model = cfg(env, "LTX_ANIME_UPSCALE_MODEL", DEFAULT_ANIME_UPSCALE_MODEL)
+        if anime_model in object_options(object_info, "UpscaleModelLoader", "model_name"):
+            anime_upscale = True
+        else:
+            warnings.append(f"anime upscaler '{anime_model}' not installed in ComfyUI (models/upscale_models) — skipping anime detail restore")
     patched = patch_ltx_workflow(
         workflow,
         image_name,
@@ -495,6 +542,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         env,
         interp_multiplier=settings["interp"],
         face_restore=face_restore,
+        anime_upscale=anime_upscale,
     )
     prompt_id = queue_comfy(comfy_url, patched, timeout=http_timeout)
     history = poll_comfy(comfy_url, prompt_id, poll_seconds, timeout_seconds, empty_queue_timeout_seconds)
