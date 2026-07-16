@@ -158,6 +158,25 @@ if [[ -n "$REDDIT_CLIENT_ID_VALUE" && -n "$REDDIT_CLIENT_SECRET_VALUE" ]]; then
   sed -i "/REDDIT_CACHE: 'on'/a\      REDDIT_CLIENT_ID: \${REDDIT_CLIENT_ID}\n      REDDIT_CLIENT_SECRET: \${REDDIT_CLIENT_SECRET}\n      REDDIT_USER_AGENT: \${REDDIT_USER_AGENT}" "$PROFILE_HOME/config.yaml"
 fi
 
+if [[ -n "$TAVILY_API_KEY_VALUE" ]]; then
+  sed -i "s/extract_backend: ''/extract_backend: tavily/" "$PROFILE_HOME/config.yaml"
+  cat >>"$PROFILE_HOME/config.yaml" <<'EOCFG'
+  tavily:
+    command: npx
+    args:
+      - -y
+      - tavily-mcp@0.1.3
+    env:
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      DEFAULT_PARAMETERS: '{"include_images":false,"include_raw_content":false,"max_results":5,"search_depth":"basic"}'
+    enabled: true
+    tools:
+      include:
+        - tavily-search
+        - tavily-extract
+EOCFG
+fi
+
 cat >"$PROFILE_HOME/.env.example" <<'EOENV'
 LM_API_KEY=lm-studio
 TELEGRAM_BOT_TOKEN=

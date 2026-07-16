@@ -8,12 +8,13 @@ description: Use for scheduled or manual niche, POD, MMO, trend, demand, competi
 ## Procedure
 
 1. State the current date and define a 24-hour evidence window. Widen to seven days only when needed and label the widened window.
-2. Call direct read-only community tools first. For Reddit, try distinct relevant subreddits; after one repeated 401/403 or server failure, record the blocker and stop calling Reddit.
-3. Run at least four query families: community pain, buying intent, current news, and competing products/listings.
-4. Open full pages for candidate evidence. Search snippets may select sources but cannot support final claims.
-5. Build an internal source ledger with URL, title, publisher, publication/access date, observed claim, and evidence type.
-6. Keep only opportunities supported by two independent URLs, including at least one source dated inside the declared window.
-7. Rank only surviving opportunities. Return fewer than ten rather than weakening the gate.
+2. Make exactly one read-only Reddit probe. On any 401/403/server failure, record the blocker and do not call another Reddit tool in this run.
+3. Use `mcp_tavily_tavily_search` for four query families: community pain, buying intent, current news, and competing products/listings.
+4. Select candidate URLs from search results, then call `mcp_tavily_tavily_extract` before treating any page as evidence. Search snippets cannot support final claims.
+5. Build a source ledger in the final response. Every source row must contain a literal clickable URL, title, publisher, publication/access date, observed claim, and evidence type.
+6. Recalculate URL and independent-domain counts only from URLs visibly listed in the final response. Never name or count a source that is not listed with its URL.
+7. Keep only opportunities supported by two independent extracted URLs, including at least one source dated inside the declared window.
+8. Rank only surviving opportunities. Return fewer than ten rather than weakening the gate.
 
 ## Evidence Gate
 

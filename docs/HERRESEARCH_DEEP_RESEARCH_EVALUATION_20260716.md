@@ -4,7 +4,7 @@
 
 `OPERATIONALLY_READY_BUT_RESEARCH_QUALITY_GATED`
 
-The profile, browser, MCP registry, skill loading, Telegram delivery, and 09:00 Asia/Tokyo cron are operational. Current output is not yet reliable enough for autonomous actionable `top 10` recommendations. Until Reddit app credentials and a higher-quality search/extract provider are configured, the cron must fail closed with `status: insufficient_evidence`.
+The profile, browser, MCP registry, skill loading, Tavily connectivity, Telegram delivery, and 09:00 Asia/Tokyo cron are operational. Current output is not yet reliable enough for autonomous actionable `top 10` recommendations. Tavily removed the search-connectivity blocker, but the local Gemma model did not reliably follow the multi-step search/extract/citation contract. The cron must therefore continue to fail closed with `status: insufficient_evidence`.
 
 ## Environment
 
@@ -76,11 +76,21 @@ Canonical smoke outputs:
 ## Remaining Inputs
 
 - Reddit client ID, client secret, and user-agent label.
-- Tavily API key.
 - Site URL plus GSC property identifier and GA4 property ID.
 - Read-only Google credential file stored outside Git.
 - Optional PageSpeed API key.
 - DataForSEO/KeywordTool credentials and per-run spending ceiling.
+
+## Tavily Deployment Addendum
+
+- Installed and audited: `tavily-mcp@0.1.3`, with the configured business-tool allowlist limited to `tavily-search` and `tavily-extract`.
+- Direct MCP smoke: PASS; both tools were discovered and no key value appeared in output.
+- Secret handling: `TAVILY_API_KEY` remains only in the mode-600 HerResearch `.env`; generated YAML uses `${TAVILY_API_KEY}`.
+- Native extract backend: `tavily` when the key is present; the installer keeps extraction disabled when the key is absent.
+- Benchmark 1: four Tavily searches succeeded, but Gemma skipped extraction and declared sources without literal URLs. Evidence: `/opt/data/hermes-profiles/herresearch/cron/output/75a5ab5ba399/2026-07-16_12-17-30.md`.
+- Benchmark 2 after stricter skill: exactly one Reddit probe and two Tavily searches; the report correctly failed closed with zero sources, but again skipped extraction, omitted URLs, ran only two of four query families, and mixed content with `[SILENT]`. Evidence: `/opt/data/hermes-profiles/herresearch/cron/output/75a5ab5ba399/2026-07-16_12-23-17.md`.
+- Quality verdict: `TOOL_CONNECTIVITY_PASS_MODEL_WORKFLOW_COMPLIANCE_FAIL`. No-code setup is exhausted for this model/prompt combination. The next justified change is a deterministic pre-delivery validator that rejects missing extract traces, missing literal URLs, mismatched counts, stale evidence, and invalid `[SILENT]` output.
+- Tavily rollback: restore `/opt/data/hermes/control-plane/backups/herresearch-tavily-20260716T031321Z/config.yaml.before-tavily`, restore the prior skill, and restart only HerResearch.
 
 ## Product Boundary
 
