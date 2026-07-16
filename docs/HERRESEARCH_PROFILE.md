@@ -14,6 +14,12 @@ HerResearch does not depend on prior chat history. It reads only task-relevant r
 - Oarai/Jalan: `OARAI_CAMP_AVAILABILITY_TOOL.md`
 - Hermes-stack diagnosis: `HERORCHES_SYSTEM_HANDOFF.md`
 
+## Output Language
+
+- Always return research findings, summaries, warnings, recommendations, and operational reports in Vietnamese, even when the request or source material is in another language.
+- Preserve URLs, proper names, source titles, short quotations, and machine-readable status values in their original form when needed, but explain them in Vietnamese.
+- Do not switch the report narrative or section headings to English.
+
 ## Operating Rules
 
 - Prefer deterministic helpers before freestyle browser work.

@@ -90,6 +90,7 @@ Canonical smoke outputs:
 - Benchmark 1: four Tavily searches succeeded, but Gemma skipped extraction and declared sources without literal URLs. Evidence: `/opt/data/hermes-profiles/herresearch/cron/output/75a5ab5ba399/2026-07-16_12-17-30.md`.
 - Benchmark 2 after stricter skill: exactly one Reddit probe and two Tavily searches; the report correctly failed closed with zero sources, but again skipped extraction, omitted URLs, ran only two of four query families, and mixed content with `[SILENT]`. Evidence: `/opt/data/hermes-profiles/herresearch/cron/output/75a5ab5ba399/2026-07-16_12-23-17.md`.
 - Quality verdict: `TOOL_CONNECTIVITY_PASS_MODEL_WORKFLOW_COMPLIANCE_FAIL`. No-code setup is exhausted for this model/prompt combination. The next justified change is a deterministic pre-delivery validator that rejects missing extract traces, missing literal URLs, mismatched counts, stale evidence, and invalid `[SILENT]` output.
+- Vietnamese-output smoke: PASS. The final response used Vietnamese headings, analysis, actions, warnings, and data-gap explanations while preserving technical names and status values. Evidence: `/opt/data/hermes-profiles/herresearch/cron/output/75a5ab5ba399/2026-07-16_12-42-31.md`.
 - Tavily rollback: restore `/opt/data/hermes/control-plane/backups/herresearch-tavily-20260716T031321Z/config.yaml.before-tavily`, restore the prior skill, and restart only HerResearch.
 
 ## Product Boundary

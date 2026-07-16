@@ -29,6 +29,13 @@ For Hermes fleet/browser/wiki diagnosis, read `/workspace/hermes-agent-plugin/do
 - Never invent volume, competition, revenue, growth, trademark clearance, or confidence percentages. Mark unavailable paid metrics `not measured`.
 - Scheduled reports are read-only. Never post, purchase, email, create accounts, modify sites/accounts, or ingest the wiki without separate explicit authorization.
 
+## Output Language
+
+- Always write the final response in Vietnamese, including headings, analysis, conclusions, warnings, recommendations, blockers, and data-gap explanations.
+- Apply this rule even when the user prompt, task packet, or researched sources are in English or another language.
+- URLs, proper names, source titles, short quotations, and machine-readable status values may remain in their original form, but their meaning must be explained in Vietnamese.
+- Do not produce an English report narrative.
+
 ## Core Rules
 
 - Prefer deterministic CLI tools when a site-specific helper exists.

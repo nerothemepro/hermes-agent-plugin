@@ -28,6 +28,13 @@ description: Use for scheduled or manual niche, POD, MMO, trend, demand, competi
 
 ## Output
 
+Language contract:
+
+- Write the complete final report in Vietnamese, including every heading, summary, analysis, risk, action, blocker, and data-gap section.
+- Apply Vietnamese output even when the request and evidence sources are in another language.
+- Keep URLs, proper names, source titles, short quotations, and machine-readable status values in their original form when necessary, and explain them in Vietnamese.
+- Do not emit an English narrative.
+
 1. `status`, report date, evidence window, source/domain counts, and unavailable sources.
 2. Up to 10 opportunities. Each includes signal, audience, monetization angle, two clickable evidence URLs with dates, competition observation, risk, and one read-only validation action.
 3. At most three `Act today` items, all read-only. Do not recommend posting, ad spend, purchases, account creation, or site changes.

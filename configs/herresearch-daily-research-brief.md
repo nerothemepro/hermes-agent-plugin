@@ -2,6 +2,8 @@
 
 Apply the attached `evidence-gated-trend-research` skill exactly.
 
+- Output language: Vietnamese only for all headings, summaries, analysis, findings, risks, actions, warnings, and data gaps. Preserve URLs, source titles, proper names, and machine-readable status values when necessary, but explain them in Vietnamese.
+
 - Market: United States.
 - Topic: POD and AI-assisted online-income niches.
 - Primary window: last 24 hours; fallback: last 7 days.
