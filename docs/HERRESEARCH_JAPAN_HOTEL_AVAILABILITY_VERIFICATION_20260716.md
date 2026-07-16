@@ -141,3 +141,48 @@ These values are volatile observations, not price guarantees.
 - Zombie process count after full command: `0`.
 - HerResearch `.env` hash unchanged.
 - No login, booking, payment, account mutation, message action, CAPTCHA bypass, stealth browser, or private API was used.
+
+## Price And Review Ranking Extension - 2026-07-16
+
+### Accepted Command Semantics
+
+- `top N` without an explicit cross-site phrase returns up to N results independently for Jalan.net, Airbnb Japan, and Booking.com.
+- `top N từ cả 3 trang`, `tổng hợp`, or an equivalent explicit phrase returns one merged top N across the three providers.
+- `Giá: 20000y/1 đêm` is a strict maximum of JPY 20,000 for one room per night. The workflow never raises this limit to fill N slots.
+- Ranking order is normalized score descending, review count descending, then room price per night ascending. Five-point Jalan/Airbnb scores are normalized to ten; Booking uses its native ten-point score.
+- Prompts without `top` and without a price constraint preserve the pre-existing unranked provider output.
+
+### Root Causes Closed
+
+1. Provider parsers previously did not preserve comparable score, review-count, and numeric-price fields. Jalan current cards, Airbnb snapshots, and Booking headed snapshots now emit these fields.
+2. A fixed Airbnb snapshot window could cross into the next listing. Card boundaries now end at the first different room ID.
+3. Airbnb may return alternative dates when the requested dates are unavailable. Any listing whose URL does not retain the exact requested check-in and check-out is excluded and reported in warnings.
+4. Jalan plan-row `.p-searchResultItem__total` is explicitly marked `total_stay`. A lowest-price fallback with unknown price basis is retained for legacy output but excluded from strict room-price ranking.
+
+### Live Acceptance
+
+Exact criteria: Tateyama, Chiba; 2026-08-16 to 2026-08-17; two adults; children aged two and nine; one room; top five per website; maximum JPY 20,000 per room/night.
+
+- Overall status: `completed`.
+- Plugin version: `0.3.0`.
+- Jalan.net: one eligible result at observation time: `ペンション シーガル`, normalized `9.00/10`, 252 reviews, JPY 18,200/night.
+- Airbnb Japan: one eligible exact-date result: `長期滞在がお得！...`, normalized `9.72/10`, 88 reviews, JPY 17,907/night. Six alternative-date listings were excluded; wrong-date accepted count was zero.
+- Booking.com: three eligible results, headed by `Bo Bo Village 館山2`, `9.3/10`, 27 reviews, JPY 18,800/night.
+- Fewer than five results is an accepted truthful outcome because the price and evidence filters are not relaxed.
+- Canonical evidence: `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/20260716T082135252653Z/report.json`; SHA-256 `b55df789a239094c734fd28e90cc46dbfcf19fcf7736e1eddbb43117911daf4b`.
+- Operator output: `/tmp/japan-hotel-ranking-deployed-live.txt`; SHA-256 `2a5a96a928419c27ac21e0a5b984ca052917ce25e50066f06d6939c96125fb98`.
+- The same candidate bundle produced a valid global ranking when parsed with `top 5 từ cả 3 trang`.
+
+### Final Verification And Rollback
+
+- Python workflow tests: `20/20` passed.
+- Hermes Agent plugin tests: `49/49` passed.
+- Jalan location/current-card tests: `2/2` passed.
+- Full source workflow and deployed native handler both completed.
+- Source/deployed `workflow.py` parity: pass.
+- Command registration: pass.
+- HerResearch gateway healthy after final restart, PID `225115` at verification time.
+- Xvfb count after workflow: `0`; zombie count: `0`.
+- HerResearch `.env` SHA-256 remained unchanged.
+- Final durable rollback script: `/opt/data/hermes/control-plane/backups/herresearch-hotel-availability-20260716T082926950870101Z/rollback.sh`.
+- No login, booking, payment, account mutation, external message, CAPTCHA bypass, stealth browser, or private API was used.

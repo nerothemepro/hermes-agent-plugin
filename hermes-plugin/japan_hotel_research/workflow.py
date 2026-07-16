@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 
 JALAN_CLI = Path(os.getenv("JAPAN_HOTEL_JALAN_CLI", "/workspace/jalan-room-search-tool/bin/jalan-room-search"))
@@ -27,6 +27,7 @@ MCP_SERVER = Path(os.getenv("JAPAN_HOTEL_MCP_SERVER", "/workspace/hermes-agent-p
 BOOKING_MCP_SERVER = Path(__file__).with_name("booking_mcp_server.sh")
 REPORT_ROOT = Path(os.getenv("JAPAN_HOTEL_REPORT_ROOT", "/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research"))
 SITE_TIMEOUT_SECONDS = 75
+CANDIDATE_LIMIT_PER_SITE = 30
 BLOCK_MARKERS = ("captcha", "verify you are human", "access denied", "robot check", "ログインしてください")
 
 
@@ -43,6 +44,9 @@ class HotelRequest:
     children_ages: list[int]
     rooms: int
     max_results_per_site: int = 3
+    max_price_jpy_per_night: int | None = None
+    ranking_scope: str = "per_site"
+    ranking_requested: bool = False
 
 
 def _fold(value: str) -> str:
@@ -105,6 +109,32 @@ def _parse_children(value: str) -> list[int]:
     return ages
 
 
+
+def _parse_jpy_limit(value: str) -> int:
+    match = re.search(r"\d[\d.,\s]*", value)
+    digits = re.sub(r"\D", "", match.group(0)) if match else ""
+    if not digits:
+        raise RequestValidationError("Giá phải là số JPY dương, ví dụ: 20000y/1 đêm.")
+    amount = int(digits)
+    if amount < 1:
+        raise RequestValidationError("Giá phải lớn hơn 0 JPY.")
+    return amount
+
+
+def _ranking_scope(raw_args: str) -> str:
+    folded = _fold(raw_args)
+    global_markers = (
+        "tu ca 3 trang",
+        "tu ca ba trang",
+        "ca 3 website",
+        "ca ba website",
+        "ca 3 site",
+        "ca ba site",
+        "tong hop chung",
+        "tong hop tu 3",
+        "tong hop tu ca ba",
+    )
+    return "global" if any(marker in folded for marker in global_markers) else "per_site"
 def parse_request(raw_args: str, *, today: date | None = None) -> HotelRequest:
     if not raw_args or not raw_args.strip():
         raise RequestValidationError("Chưa có tiêu chí tìm kiếm.")
@@ -128,10 +158,21 @@ def parse_request(raw_args: str, *, today: date | None = None) -> HotelRequest:
         raise RequestValidationError("Ngày check-in không được nằm trong quá khứ.")
 
     max_results = 3
+    top_match = re.search(r"\btop\s*(\d+)\b", _fold(raw_args))
+    if top_match:
+        max_results = min(max(int(top_match.group(1)), 1), 10)
+    else:
+        for line in lines:
+            value = _match_label(line, ("Tối đa", "Max results", "Max"))
+            if value:
+                max_results = min(_positive_int(value, "Tối đa kết quả"), 10)
+                break
+
+    max_price = None
     for line in lines:
-        value = _match_label(line, ("Tối đa", "Max results", "Max"))
+        value = _match_label(line, ("Giá", "Gia", "Price", "Ngân sách"))
         if value:
-            max_results = min(_positive_int(value, "Tối đa kết quả"), 5)
+            max_price = _parse_jpy_limit(value)
             break
 
     return HotelRequest(
@@ -142,19 +183,24 @@ def parse_request(raw_args: str, *, today: date | None = None) -> HotelRequest:
         children_ages=_parse_children(children_raw),
         rooms=_positive_int(rooms_raw, "Số phòng"),
         max_results_per_site=max_results,
+        max_price_jpy_per_night=max_price,
+        ranking_scope=_ranking_scope(raw_args),
+        ranking_requested=bool(top_match or max_price is not None),
     )
 
 
 def format_usage() -> str:
     return (
         "Cú pháp:\n"
-        "/japan-hotel-research kiểm tra phòng trống theo thông tin sau:\n"
+        "/japan-hotel-research kiểm tra phòng trống và trả về top 5 kết quả được đánh giá cao nhất:\n"
         "Khu vực: Tateyama, Chiba, Nhật Bản\n"
-        "Checkin: 2026-08-15\n"
-        "Checkout: 2026-08-16\n"
+        "Checkin: 2026-08-16\n"
+        "Checkout: 2026-08-17\n"
         "Người lớn: 2\n"
         "Trẻ em: 2 tuổi + 9 tuổi\n"
-        "Số phòng: 1"
+        "Số phòng: 1\n"
+        "Giá: 20000y/1 đêm\n\n"
+        "Mặc định: top N riêng cho từng website. Ghi 'top N từ cả 3 trang' để xếp hạng tổng hợp."
     )
 
 
@@ -361,6 +407,39 @@ class McpClient:
         self.close()
 
 
+
+def _stay_nights(request: HotelRequest) -> int:
+    return (date.fromisoformat(request.checkout) - date.fromisoformat(request.checkin)).days
+
+
+def _normalize_provider_results(
+    provider: str,
+    results: list[dict[str, Any]],
+    request: HotelRequest,
+) -> list[dict[str, Any]]:
+    nights = _stay_nights(request)
+    normalized: list[dict[str, Any]] = []
+    for result in results:
+        item = dict(result)
+        item["provider"] = provider
+        price_total = item.get("price_jpy_total")
+        if isinstance(price_total, int) and price_total > 0:
+            if item.get("price_basis") == "per_night":
+                item["price_jpy_per_night"] = price_total
+            elif item.get("price_basis") == "total_stay":
+                item["price_jpy_per_night"] = (price_total + nights - 1) // nights
+            else:
+                item["price_jpy_per_night"] = None
+        else:
+            item["price_jpy_per_night"] = None
+        rating = item.get("rating")
+        scale = item.get("rating_scale")
+        if isinstance(rating, (int, float)) and isinstance(scale, (int, float)) and scale > 0:
+            item["rating_normalized_10"] = round(float(rating) * 10 / float(scale), 2)
+        else:
+            item["rating_normalized_10"] = None
+        normalized.append(item)
+    return normalized
 def run_jalan(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     query = {
         "area": request.area,
@@ -369,7 +448,7 @@ def run_jalan(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
         "adults": request.adults,
         "children_ages": request.children_ages,
         "rooms": request.rooms,
-        "max_results": request.max_results_per_site,
+        "max_results": CANDIDATE_LIMIT_PER_SITE,
         "headless": True,
         "timeout_seconds": 60,
         "artifact_dir": str(artifact_dir / "jalan"),
@@ -392,18 +471,24 @@ def run_jalan(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
         return {"status": "error", "results": [], "warnings": [], "errors": [f"Jalan output không hợp lệ: {exc}"]}
 
     results = []
-    for row in payload.get("results", [])[: request.max_results_per_site]:
+    for row in payload.get("results", [])[:CANDIDATE_LIMIT_PER_SITE]:
         results.append(
             {
                 "name": row.get("hotel_name") or row.get("room_or_plan_title") or "Không rõ tên",
                 "price": row.get("price_text") or (f"¥{row.get('price_jpy'):,}" if isinstance(row.get("price_jpy"), int) else ""),
+                "price_jpy_total": row.get("price_jpy") if isinstance(row.get("price_jpy"), int) else None,
+                "price_basis": row.get("price_basis") or "unknown",
+                "rating": row.get("rating"),
+                "rating_scale": row.get("rating_scale") or 5,
+                "rating_label": "",
+                "review_count": row.get("review_count"),
                 "url": row.get("url") or row.get("detail_url") or payload.get("final_url", ""),
                 "availability": row.get("availability") or row.get("remaining_rooms") or "",
             }
         )
     return {
         "status": payload.get("status", "error"),
-        "results": results,
+        "results": _normalize_provider_results("jalan", results, request),
         "warnings": payload.get("warnings", []),
         "errors": payload.get("errors", []),
         "final_url": payload.get("final_url", ""),
@@ -411,9 +496,9 @@ def run_jalan(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     }
 
 
-def _parse_airbnb_results(snapshot: str, max_results: int) -> list[dict[str, str]]:
+def _parse_airbnb_results(snapshot: str, max_results: int) -> list[dict[str, Any]]:
     lines = snapshot.splitlines()
-    results: list[dict[str, str]] = []
+    cards: list[tuple[int, str, str]] = []
     seen: set[str] = set()
     for index, line in enumerate(lines):
         match = re.search(r"/url:\s*(/rooms/[^\s\"]+)", line)
@@ -424,7 +509,12 @@ def _parse_airbnb_results(snapshot: str, max_results: int) -> list[dict[str, str
         if room_id in seen:
             continue
         seen.add(room_id)
-        block = "\n".join(lines[index : min(len(lines), index + 48)])
+        cards.append((index, relative, room_id))
+
+    results: list[dict[str, Any]] = []
+    for card_index, (start, relative, _room_id) in enumerate(cards[:max_results]):
+        next_start = cards[card_index + 1][0] if card_index + 1 < len(cards) else len(lines)
+        block = "\n".join(lines[start : min(next_start, start + 120)])
         values = []
         for candidate in block.splitlines():
             value_match = re.search(r":\s*([^:\n][^\n]*)$", candidate)
@@ -433,20 +523,33 @@ def _parse_airbnb_results(snapshot: str, max_results: int) -> list[dict[str, str
                 if value and not value.startswith("/rooms/") and value not in values:
                     values.append(value)
         name = next((value for value in values if len(value) > 12 and "JPY" not in value and "レビュー" not in value), "Airbnb listing")
-        price = next((value for value in values if "JPY" in value), "")
+        price_match = re.search(r"¥\s*([\d,]+)\s*JPY", block)
+        rating_match = re.search(r"レビュー([\d,]+)件、5つ星中(\d+(?:\.\d+)?)つ星", block)
+        price_total = int(price_match.group(1).replace(",", "")) if price_match else None
+        rating = float(rating_match.group(2)) if rating_match else None
+        review_count = int(rating_match.group(1).replace(",", "")) if rating_match else None
+        price = f"¥{price_total:,}" if price_total is not None else ""
         availability = next((value for value in values if "予約可能" in value or "残り" in value), "")
         results.append(
             {
                 "name": name,
                 "price": price,
+                "price_jpy_total": price_total,
+                "price_basis": "per_night" if "（1泊）" in block else "total_stay",
+                "rating": rating,
+                "rating_scale": 5,
+                "review_count": review_count,
+                "rating_label": "",
                 "availability": availability,
                 "url": "https://www.airbnb.jp" + relative,
             }
         )
-        if len(results) >= max_results:
-            break
     return results
 
+
+def _airbnb_result_matches_request(result: dict[str, Any], request: HotelRequest) -> bool:
+    query = parse_qs(urlparse(str(result.get("url") or "")).query)
+    return query.get("check_in") == [request.checkin] and query.get("check_out") == [request.checkout]
 
 def run_airbnb(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     location_parts = _normalize_japan_location(request.area)
@@ -493,11 +596,20 @@ def run_airbnb(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
             "errors": [],
             "final_url": final_url,
         }
-    results = _parse_airbnb_results(snapshot, request.max_results_per_site)
+    parsed_results = _parse_airbnb_results(snapshot, CANDIDATE_LIMIT_PER_SITE)
+    results = [result for result in parsed_results if _airbnb_result_matches_request(result, request)]
+    dropped_alternative_dates = len(parsed_results) - len(results)
+    warnings = []
+    if dropped_alternative_dates:
+        warnings.append(
+            f"Đã loại {dropped_alternative_dates} listing dùng ngày thay thế khác ngày yêu cầu."
+        )
+    if not results:
+        warnings.append("Không trích được listing giữ đúng ngày yêu cầu từ snapshot.")
     return {
         "status": "completed" if results else "no_results",
-        "results": results,
-        "warnings": [] if results else ["Không trích được listing phù hợp từ snapshot."],
+        "results": _normalize_provider_results("airbnb", results, request),
+        "warnings": warnings,
         "errors": [],
         "final_url": final_url,
     }
@@ -551,10 +663,18 @@ def _booking_extract_results(snapshot: str, max_results: int) -> list[dict[str, 
             continue
         seen.add(base)
         price = re.search(r"(?:US\$|¥|JPY)\s?[\d,]+", block)
+        jpy_price = re.search(r"¥\s*([\d,]+)", price.group(0)) if price else None
+        rating = re.search(r"Scored\s+(\d+(?:\.\d+)?)\s+(.+?)\s+([\d,]+)\s+reviews", block)
         results.append(
             {
                 "name": heading.group(1),
                 "price": price.group(0) if price else "",
+                "price_jpy_total": int(jpy_price.group(1).replace(",", "")) if jpy_price else None,
+                "price_basis": "total_stay",
+                "rating": float(rating.group(1)) if rating else None,
+                "rating_scale": 10,
+                "rating_label": rating.group(2).strip() if rating else "",
+                "review_count": int(rating.group(3).replace(",", "")) if rating else None,
                 "url": url,
                 "availability": "",
             }
@@ -606,7 +726,7 @@ def run_booking(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
             "final_url": final_url,
         }
 
-    results = _booking_extract_results(snapshot, request.max_results_per_site)
+    results = _booking_extract_results(snapshot, CANDIDATE_LIMIT_PER_SITE)
     criteria_artifact = artifact_dir / "booking-criteria.json"
     criteria_artifact.write_text(
         json.dumps(
@@ -624,7 +744,7 @@ def run_booking(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     os.chmod(criteria_artifact, 0o600)
     return {
         "status": "completed" if results else "no_results",
-        "results": results,
+        "results": _normalize_provider_results("booking", results, request),
         "warnings": [] if results else ["Không tìm thấy property card phù hợp trong kết quả đã xác minh tiêu chí."],
         "errors": [],
         "final_url": final_url,
@@ -639,6 +759,114 @@ def _overall_status(sites: dict[str, dict[str, Any]]) -> str:
     return "error"
 
 
+
+def _ranking_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        -float(item["rating_normalized_10"]),
+        -int(item.get("review_count") or 0),
+        int(item["price_jpy_per_night"]),
+        str(item.get("provider") or ""),
+        str(item.get("name") or ""),
+    )
+
+
+def build_rankings(request: HotelRequest, sites: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    eligible_by_site: dict[str, list[dict[str, Any]]] = {}
+    scanned = 0
+    rejected_over_price = 0
+    rejected_missing_evidence = 0
+
+    for provider, site in sites.items():
+        eligible: list[dict[str, Any]] = []
+        for result in site.get("results", []):
+            scanned += 1
+            item = dict(result)
+            item["provider"] = provider
+            rating = item.get("rating_normalized_10")
+            price = item.get("price_jpy_per_night")
+            if not isinstance(rating, (int, float)) or not isinstance(price, int) or price < 1:
+                rejected_missing_evidence += 1
+                continue
+            if request.max_price_jpy_per_night is not None and price > request.max_price_jpy_per_night:
+                rejected_over_price += 1
+                continue
+            eligible.append(item)
+        eligible_by_site[provider] = sorted(eligible, key=_ranking_sort_key)
+
+    ranking: dict[str, Any] = {
+        "scope": request.ranking_scope,
+        "top_n": request.max_results_per_site,
+        "max_price_jpy_per_night": request.max_price_jpy_per_night,
+        "scanned": scanned,
+        "rejected_over_price": rejected_over_price,
+        "rejected_missing_evidence": rejected_missing_evidence,
+    }
+    if request.ranking_scope == "global":
+        merged = [item for items in eligible_by_site.values() for item in items]
+        ranking["results"] = sorted(merged, key=_ranking_sort_key)[: request.max_results_per_site]
+    else:
+        ranking["by_site"] = {
+            provider: items[: request.max_results_per_site]
+            for provider, items in eligible_by_site.items()
+        }
+    return ranking
+
+def _format_ranked_item(index: int, item: dict[str, Any]) -> list[str]:
+    labels = {"jalan": "Jalan.net", "airbnb": "Airbnb Japan", "booking": "Booking.com"}
+    provider = labels.get(str(item.get("provider")), str(item.get("provider") or "unknown"))
+    rating = float(item["rating_normalized_10"])
+    review_count = int(item.get("review_count") or 0)
+    price = int(item["price_jpy_per_night"])
+    label = str(item.get("rating_label") or "").strip()
+    rating_detail = f"{rating:.1f}/10"
+    if label:
+        rating_detail += f" · {label}"
+    rating_detail += f" · {review_count:,} đánh giá · ¥{price:,}/đêm"
+    availability = str(item.get("availability") or "").strip()
+    if availability:
+        rating_detail += f" · {availability}"
+    lines = [f"{index}. [{provider}] {item.get('name', 'Không rõ tên')}", f"   {rating_detail}"]
+    if item.get("url"):
+        lines.append(str(item["url"]))
+    return lines
+
+
+def _format_ranking(request: HotelRequest, report: dict[str, Any]) -> list[str]:
+    ranking = report["ranking"]
+    top_n = int(ranking["top_n"])
+    max_price = ranking.get("max_price_jpy_per_night")
+    price_text = f"giá <= ¥{int(max_price):,}/phòng/đêm" if max_price else "không giới hạn giá"
+    lines: list[str] = []
+    if ranking["scope"] == "global":
+        lines.append(f"Top {top_n} tổng hợp từ cả 3 website ({price_text})")
+        results = ranking.get("results", [])
+        if results:
+            for index, item in enumerate(results, start=1):
+                lines.extend(_format_ranked_item(index, item))
+        else:
+            lines.append("Không có kết quả đủ bằng chứng giá và đánh giá trong điều kiện lọc.")
+    else:
+        lines.append(f"Top {top_n} riêng cho từng website ({price_text})")
+        labels = {"jalan": "Jalan.net", "airbnb": "Airbnb Japan", "booking": "Booking.com"}
+        for provider in ("jalan", "airbnb", "booking"):
+            lines.extend(["", f"{labels[provider]}:"])
+            results = ranking.get("by_site", {}).get(provider, [])
+            if results:
+                for index, item in enumerate(results, start=1):
+                    lines.extend(_format_ranked_item(index, item))
+            else:
+                lines.append("Không có kết quả đủ bằng chứng trong điều kiện lọc.")
+    lines.extend(
+        [
+            "",
+            (
+                f"Đã quét {ranking.get('scanned', 0)} candidates; "
+                f"{ranking.get('rejected_over_price', 0)} vượt giá; "
+                f"{ranking.get('rejected_missing_evidence', 0)} thiếu giá/rating."
+            ),
+        ]
+    )
+    return lines
 def format_vietnamese_report(request: HotelRequest, report: dict[str, Any]) -> str:
     site_labels = {"jalan": "Jalan.net", "airbnb": "Airbnb Japan", "booking": "Booking.com"}
     lines = [
@@ -652,19 +880,31 @@ def format_vietnamese_report(request: HotelRequest, report: dict[str, Any]) -> s
         f"Evidence JSON: {report.get('artifact_path', '')}",
         "",
     ]
-    for key in ("jalan", "airbnb", "booking"):
-        site = report.get("sites", {}).get(key, {})
-        lines.append(f"{site_labels[key]}: {site.get('status', 'error')}")
-        for index, item in enumerate(site.get("results", [])[: request.max_results_per_site], start=1):
-            details = " | ".join(part for part in (item.get("name", ""), item.get("price", ""), item.get("availability", "")) if part)
-            lines.append(f"{index}. {details}")
-            if item.get("url"):
-                lines.append(item["url"])
-        for warning in site.get("warnings", []):
-            lines.append(f"- Cảnh báo: {warning}")
-        for error in site.get("errors", []):
-            lines.append(f"- Lỗi: {error}")
+    if report.get("ranking"):
+        lines.extend(_format_ranking(request, report))
         lines.append("")
+        for key in ("jalan", "airbnb", "booking"):
+            site = report.get("sites", {}).get(key, {})
+            warnings = site.get("warnings", [])
+            errors = site.get("errors", [])
+            if warnings or errors or site.get("status") not in {"completed", "no_results"}:
+                lines.append(f"{site_labels[key]} status: {site.get('status', 'error')}")
+                lines.extend(f"- Cảnh báo: {warning}" for warning in warnings)
+                lines.extend(f"- Lỗi: {error}" for error in errors)
+    else:
+        for key in ("jalan", "airbnb", "booking"):
+            site = report.get("sites", {}).get(key, {})
+            lines.append(f"{site_labels[key]}: {site.get('status', 'error')}")
+            for index, item in enumerate(site.get("results", [])[: request.max_results_per_site], start=1):
+                details = " | ".join(part for part in (item.get("name", ""), item.get("price", ""), item.get("availability", "")) if part)
+                lines.append(f"{index}. {details}")
+                if item.get("url"):
+                    lines.append(item["url"])
+            for warning in site.get("warnings", []):
+                lines.append(f"- Cảnh báo: {warning}")
+            for error in site.get("errors", []):
+                lines.append(f"- Lỗi: {error}")
+            lines.append("")
     lines.extend(
         [
             "Chỉ kiểm tra read-only; không đăng nhập, không đặt phòng và không thanh toán.",
@@ -699,6 +939,8 @@ def run_workflow(request: HotelRequest) -> str:
             }
 
     report["status"] = _overall_status(report["sites"])
+    if request.ranking_requested:
+        report["ranking"] = build_rankings(request, report["sites"])
     report["completed_at"] = datetime.now(timezone.utc).isoformat()
     report_path = artifact_dir / "report.json"
     report["artifact_path"] = str(report_path)

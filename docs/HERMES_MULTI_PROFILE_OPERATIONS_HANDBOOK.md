@@ -315,16 +315,17 @@ bash /workspace/hermes-agent-plugin/scripts/install_herresearch_hotel_availabili
 The production Telegram entry point is the native plugin command:
 
 ```text
-/japan-hotel-research kiểm tra phòng trống theo thông tin sau:
+/japan-hotel-research kiểm tra phòng trống và trả về top 5 kết quả được đánh giá cao nhất:
 Khu vực: Tateyama, Chiba, Nhật Bản
-Checkin: 2026-08-15
-Checkout: 2026-08-16
+Checkin: 2026-08-16
+Checkout: 2026-08-17
 Người lớn: 2
 Trẻ em: 2 tuổi + 9 tuổi
 Số phòng: 1
+Giá: 20000y/1 đêm
 ```
 
-This command bypasses the LLM and executes the deterministic workflow directly. It validates all fields before opening a browser, defaults to three results per site, and writes evidence below `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/`. `/japan_hotel_research` is the Telegram-menu-safe equivalent.
+This command bypasses the LLM and executes the deterministic workflow directly. It validates all fields before opening a browser, scans up to 30 candidates per site, applies the maximum room price per night without relaxing it, and ranks only results that contain both price and review evidence. A plain `top N` returns up to N results for each website. An explicit `top N từ cả 3 trang`, `tổng hợp`, or equivalent phrase returns one merged top N across Jalan, Airbnb, and Booking. Jalan and Airbnb ratings are normalized from 5 to 10; Booking remains on its native 10-point scale. Ties are resolved by review count descending and then price ascending. Evidence is written below `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/`. `/japan_hotel_research` is the Telegram-menu-safe equivalent.
 
 Routing is intentionally asymmetric:
 

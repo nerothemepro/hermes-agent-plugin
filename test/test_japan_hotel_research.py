@@ -40,6 +40,7 @@ Số phòng: 1""",
         self.assertEqual(request.children_ages, [2, 9])
         self.assertEqual(request.rooms, 1)
         self.assertEqual(request.max_results_per_site, 3)
+        self.assertFalse(request.ranking_requested)
 
     def test_normalizes_vietnamese_country_for_airbnb_slug(self):
         workflow = load_workflow()
@@ -160,6 +161,7 @@ Số phòng: 1"""
                   - link "Shinon 森音 Opens in new window":
                     - /url: https://www.booking.com/hotel/jp/shinon-sen-yin.html?checkin=2026-08-15&checkout=2026-08-16&group_children=2
                     - text: Shinon 森音
+                - generic: Scored 8.8 Excellent 240 reviews
                 - generic: ¥115,200
         """
 
@@ -168,6 +170,11 @@ Số phòng: 1"""
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["name"], "Shinon 森音")
         self.assertEqual(results[0]["price"], "¥115,200")
+        self.assertEqual(results[0]["price_jpy_total"], 115200)
+        self.assertEqual(results[0]["rating"], 8.8)
+        self.assertEqual(results[0]["rating_scale"], 10)
+        self.assertEqual(results[0]["rating_label"], "Excellent")
+        self.assertEqual(results[0]["review_count"], 240)
         self.assertIn("checkin=2026-08-15", results[0]["url"])
 
     def test_terminates_entire_mcp_process_group(self):
@@ -206,6 +213,205 @@ Số phòng: 1"""
                 if proc.poll() is None:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=5)
+
+    def test_parses_price_and_defaults_top_n_to_per_site(self):
+        workflow = load_workflow()
+        request = workflow.parse_request(
+            """kiểm tra phòng trống và trả về top 5 kết quả được đánh giá cao nhất:
+Khu vực: Tateyama, Chiba, Nhật Bản
+Checkin: 2026-08-16
+Checkout: 2026-08-17
+Người lớn: 2
+Trẻ em: 2 tuổi + 9 tuổi
+Số phòng: 1
+Giá: 20000y/1 đêm""",
+            today=date(2026, 7, 16),
+        )
+
+        self.assertEqual(request.max_results_per_site, 5)
+        self.assertEqual(request.max_price_jpy_per_night, 20000)
+        self.assertEqual(request.ranking_scope, "per_site")
+        self.assertTrue(request.ranking_requested)
+
+    def test_explicit_all_three_sites_selects_global_ranking(self):
+        workflow = load_workflow()
+        request = workflow.parse_request(
+            """trả về top 5 kết quả từ cả 3 trang
+Khu vực: Tateyama, Chiba, Nhật Bản
+Checkin: 2026-08-16
+Checkout: 2026-08-17
+Người lớn: 2
+Trẻ em: không
+Số phòng: 1
+Giá: 20.000 JPY/đêm""",
+            today=date(2026, 7, 16),
+        )
+
+        self.assertEqual(request.max_results_per_site, 5)
+        self.assertEqual(request.max_price_jpy_per_night, 20000)
+        self.assertEqual(request.ranking_scope, "global")
+
+    def test_unknown_price_basis_is_not_rankable(self):
+        workflow = load_workflow()
+        request = workflow.HotelRequest(
+            area="Tateyama", checkin="2026-08-16", checkout="2026-08-17",
+            adults=2, children_ages=[], rooms=1,
+        )
+
+        normalized = workflow._normalize_provider_results(
+            "jalan",
+            [{"price_jpy_total": 10000, "price_basis": "unknown", "rating": 4.8, "rating_scale": 5}],
+            request,
+        )
+
+        self.assertIsNone(normalized[0]["price_jpy_per_night"])
+
+    def test_filters_and_ranks_globally_without_relaxing_price(self):
+        workflow = load_workflow()
+        request = workflow.HotelRequest(
+            area="Tateyama", checkin="2026-08-16", checkout="2026-08-17",
+            adults=2, children_ages=[], rooms=1, max_results_per_site=5,
+            max_price_jpy_per_night=20000, ranking_scope="global",
+        )
+        sites = {
+            "jalan": {"results": [
+                {"name": "Jalan A", "rating_normalized_10": 9.2, "review_count": 10, "price_jpy_per_night": 19000},
+            ]},
+            "airbnb": {"results": [
+                {"name": "Too expensive", "rating_normalized_10": 10.0, "review_count": 100, "price_jpy_per_night": 21000},
+            ]},
+            "booking": {"results": [
+                {"name": "Booking A", "rating_normalized_10": 9.2, "review_count": 50, "price_jpy_per_night": 18000},
+                {"name": "Booking B", "rating_normalized_10": 8.8, "review_count": 240, "price_jpy_per_night": 19000},
+            ]},
+        }
+
+        ranking = workflow.build_rankings(request, sites)
+
+        self.assertEqual(ranking["scope"], "global")
+        self.assertEqual([item["name"] for item in ranking["results"]], ["Booking A", "Jalan A", "Booking B"])
+        self.assertEqual(ranking["rejected_over_price"], 1)
+
+    def test_parses_airbnb_price_rating_and_review_count(self):
+        workflow = load_workflow()
+        snapshot = """
+          - link:
+            - /url: /rooms/123?check_in=2026-08-16&check_out=2026-08-17
+          - generic: Tateyama family villa
+          - generic: レビュー88件、5つ星中4.86つ星の平均評価
+          - text: ¥17,907 JPY
+          - generic: ¥17,907 JPY （1泊）
+        """
+
+        results = workflow._parse_airbnb_results(snapshot, 5)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["price_jpy_total"], 17907)
+        self.assertEqual(results[0]["rating"], 4.86)
+        self.assertEqual(results[0]["rating_scale"], 5)
+        self.assertEqual(results[0]["review_count"], 88)
+
+    def test_formats_global_ranking_summary(self):
+        workflow = load_workflow()
+        request = workflow.HotelRequest(
+            area="Tateyama", checkin="2026-08-16", checkout="2026-08-17",
+            adults=2, children_ages=[], rooms=1, max_results_per_site=2,
+            max_price_jpy_per_night=20000, ranking_scope="global",
+        )
+        report = {
+            "status": "completed",
+            "artifact_path": "/tmp/global.json",
+            "sites": {name: {"status": "completed", "results": [], "warnings": [], "errors": []} for name in ("jalan", "airbnb", "booking")},
+            "ranking": {
+                "scope": "global", "top_n": 2, "max_price_jpy_per_night": 20000,
+                "scanned": 20, "rejected_over_price": 15, "rejected_missing_evidence": 1,
+                "results": [
+                    {"provider": "booking", "name": "Hotel A", "rating_normalized_10": 9.2, "rating_label": "Wonderful", "review_count": 100, "price_jpy_per_night": 18000, "url": "https://example.test/a"},
+                ],
+            },
+        }
+
+        text = workflow.format_vietnamese_report(request, report)
+
+        self.assertIn("Top 2 tổng hợp từ cả 3 website", text)
+        self.assertIn("[Booking.com] Hotel A", text)
+        self.assertIn("9.2/10", text)
+        self.assertIn("100 đánh giá", text)
+        self.assertIn("¥18,000/đêm", text)
+        self.assertIn("15 vượt giá", text)
+
+    def test_formats_per_site_ranking_summary(self):
+        workflow = load_workflow()
+        request = workflow.HotelRequest(
+            area="Tateyama", checkin="2026-08-16", checkout="2026-08-17",
+            adults=2, children_ages=[], rooms=1, max_results_per_site=2,
+            max_price_jpy_per_night=20000, ranking_scope="per_site",
+        )
+        item = {"provider": "airbnb", "name": "Villa B", "rating_normalized_10": 9.8, "rating_label": "", "review_count": 88, "price_jpy_per_night": 17907, "url": "https://example.test/b"}
+        report = {
+            "status": "completed", "artifact_path": "/tmp/per-site.json",
+            "sites": {name: {"status": "completed", "results": [], "warnings": [], "errors": []} for name in ("jalan", "airbnb", "booking")},
+            "ranking": {
+                "scope": "per_site", "top_n": 2, "max_price_jpy_per_night": 20000,
+                "scanned": 10, "rejected_over_price": 3, "rejected_missing_evidence": 0,
+                "by_site": {"jalan": [], "airbnb": [item], "booking": []},
+            },
+        }
+
+        text = workflow.format_vietnamese_report(request, report)
+
+        self.assertIn("Top 2 riêng cho từng website", text)
+        self.assertIn("Airbnb Japan", text)
+        self.assertIn("Villa B", text)
+        self.assertIn("9.8/10", text)
+
+    def test_airbnb_card_window_reaches_price_after_repeated_image_links(self):
+        workflow = load_workflow()
+        filler = "\n".join(f"          - generic: filler {index}" for index in range(50))
+        snapshot = (
+            "          - /url: /rooms/456?check_in=2026-08-16&check_out=2026-08-17\n"
+            "          - generic: レビュー20件、5つ星中4.9つ星の平均評価\n"
+            + filler
+            + "\n          - text: ¥19,500 JPY\n          - generic: ¥19,500 JPY （1泊)"
+        )
+
+        results = workflow._parse_airbnb_results(snapshot, 5)
+
+        self.assertEqual(results[0]["price_jpy_total"], 19500)
+
+    def test_airbnb_card_does_not_mix_next_listing_metadata(self):
+        workflow = load_workflow()
+        snapshot = """
+          - /url: /rooms/111?check_in=2026-08-16&check_out=2026-08-17
+          - generic: First Tateyama villa
+          - /url: /rooms/111?check_in=2026-08-16&check_out=2026-08-17
+          - /url: /rooms/222?check_in=2026-08-17&check_out=2026-08-18
+          - generic: Second Tateyama villa
+          - generic: レビュー99件、5つ星中5.0つ星の平均評価
+          - text: ¥10,000 JPY
+          - generic: ¥10,000 JPY （1泊）
+        """
+
+        results = workflow._parse_airbnb_results(snapshot, 5)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["name"], "First Tateyama villa")
+        self.assertIsNone(results[0]["price_jpy_total"])
+        self.assertIsNone(results[0]["review_count"])
+        self.assertEqual(results[1]["name"], "Second Tateyama villa")
+        self.assertEqual(results[1]["price_jpy_total"], 10000)
+
+    def test_airbnb_rejects_alternative_dates(self):
+        workflow = load_workflow()
+        request = workflow.HotelRequest(
+            area="Tateyama", checkin="2026-08-16", checkout="2026-08-17",
+            adults=2, children_ages=[2, 9], rooms=1,
+        )
+        exact = {"url": "https://www.airbnb.jp/rooms/111?check_in=2026-08-16&check_out=2026-08-17"}
+        alternative = {"url": "https://www.airbnb.jp/rooms/222?check_in=2026-08-17&check_out=2026-08-18"}
+
+        self.assertTrue(workflow._airbnb_result_matches_request(exact, request))
+        self.assertFalse(workflow._airbnb_result_matches_request(alternative, request))
 
 
 if __name__ == "__main__":

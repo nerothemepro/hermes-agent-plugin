@@ -55,6 +55,15 @@ The command parser accepts Vietnamese or English labels, requires each child age
 - Accept `completed`, `no_results`, or a truthful `blocked` result with URL/evidence. CAPTCHA, login wall, or anti-automation response must stop that site lane.
 - No booking, login, checkout, payment, account creation, or external message is allowed.
 
+## Price And Rating Ranking Extension
+
+- `Giá` is interpreted as the maximum JPY price for one room per night. The filter is strict and is never relaxed to fill the requested result count.
+- The workflow scans at most 30 candidates per provider, then excludes candidates missing either a normalized rating or a normalized per-night price.
+- A plain `top N` means up to N ranked results per website. Explicit wording such as `top N từ cả 3 trang` or `tổng hợp` means one global ranking across all three providers.
+- Ranking order is normalized rating descending, review count descending, then room price per night ascending. Jalan and Airbnb five-point ratings are normalized to ten; Booking remains on ten.
+- Airbnb listings whose URL contains alternative dates are excluded even if the site presents them in the search response.
+- Result counts below N are valid when the strict price/evidence filters leave fewer eligible candidates.
+
 ## Dependency Notes
 
 - Jalan depends on the existing clean checkout at `/workspace/jalan-room-search-tool` and its installed Playwright Chromium runtime.
