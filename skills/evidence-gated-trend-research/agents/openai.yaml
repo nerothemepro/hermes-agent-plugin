@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evidence-Gated Trend Research"
+  short_description: "Research current niches with strict source and freshness gates."
+  default_prompt: "Research the requested niche using the evidence gate and return only source-backed opportunities."
