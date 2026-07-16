@@ -11,7 +11,7 @@ Primary tools: `web_search`, web extraction, Playwright MCP/Browser Use, cron, m
 HerResearch does not depend on prior chat history. It reads only task-relevant runbooks after a fresh session or reset:
 
 - Facebook/wiki: `FACEBOOK_BATCH_CAPTURE_TO_WIKI_INBOX_TOOL.md` and `HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md`
-- Oarai/Jalan: `OARAI_CAMP_AVAILABILITY_TOOL.md`
+- Japan room availability: load the `japan-hotel-availability` skill; use `OARAI_CAMP_AVAILABILITY_TOOL.md` only for the Oarai camp helper
 - Hermes-stack diagnosis: `HERORCHES_SYSTEM_HANDOFF.md`
 
 ## Output Language
@@ -23,6 +23,8 @@ HerResearch does not depend on prior chat history. It reads only task-relevant r
 ## Operating Rules
 
 - Prefer deterministic helpers before freestyle browser work.
+- For Japan room availability, load `japan-hotel-availability`. Route Jalan.net to `/workspace/jalan-room-search-tool/bin/jalan-room-search`; use bounded Playwright MCP actions for Booking.com and Airbnb Japan.
+- Room searches are read-only. Never log in, book, reserve, pay, message, create an account, bypass CAPTCHA, or use undocumented/private APIs.
 - `/github-discovery` stays deterministic and report-first.
 - Deep research loads `deep-research`, uses the direct read-only Reddit MCP tools when available, expands query families, opens primary pages, cites material claims, and names evidence gaps.
 - Reddit anonymous HTTP failures are reported as a blocker; never fabricate community signals. App-only credentials belong in the live `.env`.

@@ -11,7 +11,7 @@ For Facebook capture or wiki handoff, read:
 /workspace/hermes-agent-plugin/docs/HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md
 ```
 
-For Oarai/Jalan availability, read `/workspace/hermes-agent-plugin/docs/OARAI_CAMP_AVAILABILITY_TOOL.md`.
+For Japan room availability, load the `japan-hotel-availability` skill. For the separate Oarai camp helper, read `/workspace/hermes-agent-plugin/docs/OARAI_CAMP_AVAILABILITY_TOOL.md`.
 
 For Hermes fleet/browser/wiki diagnosis, read `/workspace/hermes-agent-plugin/docs/HERORCHES_SYSTEM_HANDOFF.md`.
 
@@ -39,6 +39,8 @@ For Hermes fleet/browser/wiki diagnosis, read `/workspace/hermes-agent-plugin/do
 ## Core Rules
 
 - Prefer deterministic CLI tools when a site-specific helper exists.
+- For Jalan.net room searches, call `/workspace/jalan-room-search-tool/bin/jalan-room-search` instead of generating selectors. Use the bounded Playwright MCP for Booking.com and Airbnb Japan.
+- Hotel workflows stop at read-only search and reporting. Never log in, book, reserve, pay, message, create accounts, or bypass CAPTCHA/access controls.
 - Do not hallucinate inaccessible web or Facebook content.
 - Report login walls, dynamic-rendering blocks, and anti-automation failures exactly.
 - Write only successful Facebook captures into `raw/inbox/`; report failures separately.

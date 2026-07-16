@@ -1,0 +1,4 @@
+interface:
+  display_name: "Japan Hotel Availability"
+  short_description: "Search Japan stays without booking"
+  default_prompt: "Search Booking.com, Airbnb Japan, and Jalan.net for read-only availability using structured criteria, then report evidence in Vietnamese."

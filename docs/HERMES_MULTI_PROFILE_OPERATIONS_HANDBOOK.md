@@ -304,6 +304,35 @@ Operational rule for booking/search sites:
 - For Jalan.net, stable hotel-form selectors include `#jalan_form`, `#dyn_y_txt`, `#dyn_m_txt`, `#dyn_d_txt`, `#dyn_stay_txt`, `#dyn_room_num`, `#dyn_adult_num`, `#ken_list`, `#area_list`, `#research_02`; Tochigi `kenCd` is `080000`.
 - Avoid broad text locators like `text=宿・ホテル`; they match multiple elements and trigger strict-mode violations.
 
+### HerResearch Japan room availability
+
+Install the bounded room-search skill and form tools:
+
+```bash
+bash /workspace/hermes-agent-plugin/scripts/install_herresearch_hotel_availability.sh herresearch
+```
+
+Routing is intentionally asymmetric:
+
+- Jalan.net uses the deterministic `/workspace/jalan-room-search-tool/bin/jalan-room-search` CLI.
+- Booking.com and Airbnb Japan use the existing Playwright MCP with direct search URLs first and bounded form interaction only when needed.
+- The Playwright include list adds only `browser_type`, `browser_fill_form`, `browser_select_option`, `browser_tabs`, and `browser_take_screenshot`.
+
+The workflow is search-only. It must stop on CAPTCHA/login/access denial and must never book, reserve, pay, message, create an account, upload files, change browser storage, or use private/undocumented APIs.
+
+Smoke criteria:
+
+```text
+area=Tokyo
+checkin=2026-08-15
+checkout=2026-08-16
+adults=2
+rooms=1
+max_results_per_site=3
+```
+
+After installation, restart only HerResearch and verify the MCP roster. Roll back with the exact command emitted by the installer from its durable backup directory.
+
 ## Telegram Smoke Tests
 
 After restart, open each Telegram bot and send:

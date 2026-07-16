@@ -19,6 +19,8 @@ cp /workspace/hermes-agent-plugin/docs/HERRESEARCH_PROFILE.md "$PROFILE_HOME/PRO
 cp /workspace/hermes-agent-plugin/docs/HERRESEARCH_SOUL.md "$PROFILE_HOME/SOUL.md"
 install -d -m 700 "$PROFILE_HOME/skills/research/evidence-gated-trend-research"
 cp /workspace/hermes-agent-plugin/skills/evidence-gated-trend-research/SKILL.md "$PROFILE_HOME/skills/research/evidence-gated-trend-research/SKILL.md"
+install -d -m 700 "$PROFILE_HOME/skills/research/japan-hotel-availability"
+cp -a /workspace/hermes-agent-plugin/skills/japan-hotel-availability/. "$PROFILE_HOME/skills/research/japan-hotel-availability/"
 
 cat >"$PROFILE_HOME/config.yaml" <<'EOCFG'
 model:
@@ -134,6 +136,11 @@ mcp_servers:
         - browser_click
         - browser_wait_for
         - browser_network_requests
+        - browser_type
+        - browser_fill_form
+        - browser_select_option
+        - browser_tabs
+        - browser_take_screenshot
   reddit:
     command: npx
     args:
