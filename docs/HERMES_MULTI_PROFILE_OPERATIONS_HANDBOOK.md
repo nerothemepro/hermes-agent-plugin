@@ -312,6 +312,20 @@ Install the bounded room-search skill and form tools:
 bash /workspace/hermes-agent-plugin/scripts/install_herresearch_hotel_availability.sh herresearch
 ```
 
+The production Telegram entry point is the native plugin command:
+
+```text
+/japan-hotel-research kiểm tra phòng trống theo thông tin sau:
+Khu vực: Tateyama, Chiba, Nhật Bản
+Checkin: 2026-08-15
+Checkout: 2026-08-16
+Người lớn: 2
+Trẻ em: 2 tuổi + 9 tuổi
+Số phòng: 1
+```
+
+This command bypasses the LLM and executes the deterministic workflow directly. It validates all fields before opening a browser, defaults to three results per site, and writes evidence below `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/`. `/japan_hotel_research` is the Telegram-menu-safe equivalent.
+
 Routing is intentionally asymmetric:
 
 - Jalan.net uses the deterministic `/workspace/jalan-room-search-tool/bin/jalan-room-search` CLI.
@@ -331,7 +345,13 @@ rooms=1
 max_results_per_site=3
 ```
 
-After installation, restart only HerResearch and verify the MCP roster. Roll back with the exact command emitted by the installer from its durable backup directory.
+After installation, restart only HerResearch and verify the MCP roster plus native command discovery:
+
+```bash
+HERMES_HOME=/opt/data/hermes-profiles/herresearch /workspace/.venvs/hermes-agent/bin/python -c "from hermes_cli.plugins import get_plugin_commands; print(sorted(get_plugin_commands()))"
+```
+
+The output must include `japan-hotel-research`. Roll back with the exact command emitted by the installer from its durable backup directory.
 
 ## Telegram Smoke Tests
 

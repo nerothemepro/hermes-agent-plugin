@@ -44,3 +44,18 @@ test('profile installer installs the hotel skill without secret literals', () =>
   assert.match(deploymentInstaller, /rollback\.sh/);
   assert.doesNotMatch(installer + deploymentInstaller, /TAVILY_API_KEY=[A-Za-z0-9_-]{20,}/);
 });
+
+test('native Telegram command bypasses LLM routing and is deployed reversibly', () => {
+  const plugin = read('hermes-plugin/japan_hotel_research/__init__.py');
+  const manifest = read('hermes-plugin/japan_hotel_research/plugin.yaml');
+  const deploymentInstaller = read('scripts/install_herresearch_hotel_availability.sh');
+  const profileInstaller = read('scripts/install_herresearch_profile.sh');
+
+  assert.match(plugin, /register_command\(\s*["']japan-hotel-research["']/s);
+  assert.match(manifest, /name:\s*japan-hotel-research/);
+  assert.match(deploymentInstaller, /plugins\/japan-hotel-research/);
+  assert.match(deploymentInstaller, /plugins\.enabled|setdefault\(["']plugins["']/);
+  assert.match(deploymentInstaller, /rollback\.sh/);
+  assert.match(profileInstaller, /japan_hotel_research/);
+  assert.doesNotMatch(profileInstaller + deploymentInstaller, /TELEGRAM_BOT_TOKEN=[A-Za-z0-9:_-]{20,}/);
+});

@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+PLUGIN_PARENT = Path(__file__).resolve().parents[1] / "hermes-plugin"
+sys.path.insert(0, str(PLUGIN_PARENT))
+
+from japan_hotel_research.workflow import RequestValidationError, format_usage, parse_request, run_workflow
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Deterministic Japan hotel research")
+    parser.add_argument("--input", help="Raw multiline command payload")
+    parser.add_argument("--input-file", help="Read raw payload from file")
+    args = parser.parse_args()
+    raw = args.input
+    if args.input_file:
+        raw = Path(args.input_file).read_text(encoding="utf-8")
+    if raw is None:
+        raw = sys.stdin.read()
+    try:
+        request = parse_request(raw)
+    except RequestValidationError as exc:
+        print(f"Yêu cầu chưa hợp lệ: {exc}\n\n{format_usage()}")
+        return 2
+    print(run_workflow(request))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -4,6 +4,12 @@
 
 Add a read-only Japan accommodation search workflow to HerResearch for Booking.com, Airbnb Japan, and Jalan.net. Reuse the existing deterministic Jalan CLI and the existing Playwright MCP. Do not add an unofficial scraper, private API integration, booking flow, account mutation, or payment action.
 
+## Deterministic Telegram Command Extension
+
+The natural-language skill path remains useful for exploratory work, but it is not the production entry point for hotel availability. The supported operator entry point is the native Hermes plugin command `/japan-hotel-research`. The gateway passes raw command arguments directly to the plugin handler, so Gemma does not select tools, invent helper names, or promise asynchronous work.
+
+The command parser accepts Vietnamese or English labels, requires each child age, validates ISO dates before browser startup, runs each site once with bounded timeouts, persists one JSON evidence artifact, and always returns an operator-friendly Vietnamese summary. It does not use a `quick_commands` alias or exec entry because those paths either re-enter the LLM loop or impose the core 30-second exec timeout.
+
 ## Execution Order
 
 ### 1. Lock the integration contract
@@ -28,6 +34,8 @@ Add a read-only Japan accommodation search workflow to HerResearch for Booking.c
 
 ### 4. Install and document the workflow
 
+- Install `hermes-plugin/japan_hotel_research` into the profile plugin registry and enable only `japan-hotel-research` under `plugins.enabled`.
+- Register `/japan-hotel-research` as a native plugin command without a competing quick-command alias.
 - Update the HerResearch installer to copy the new skill.
 - Update profile/SOUL and the operations handbook with routing, safety, input/output, smoke, and rollback guidance.
 - Verification: contract test, skill validation, shell syntax, YAML parsing, and scoped secret scan.

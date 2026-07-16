@@ -1,0 +1,5 @@
+name: japan-hotel-research
+version: 0.1.0
+description: "Deterministic Japan hotel availability research command for HerResearch."
+author: local
+kind: standalone

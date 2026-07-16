@@ -21,6 +21,8 @@ install -d -m 700 "$PROFILE_HOME/skills/research/evidence-gated-trend-research"
 cp /workspace/hermes-agent-plugin/skills/evidence-gated-trend-research/SKILL.md "$PROFILE_HOME/skills/research/evidence-gated-trend-research/SKILL.md"
 install -d -m 700 "$PROFILE_HOME/skills/research/japan-hotel-availability"
 cp -a /workspace/hermes-agent-plugin/skills/japan-hotel-availability/. "$PROFILE_HOME/skills/research/japan-hotel-availability/"
+install -d -m 700 "$PROFILE_HOME/plugins/japan-hotel-research"
+cp -a /workspace/hermes-agent-plugin/hermes-plugin/japan_hotel_research/. "$PROFILE_HOME/plugins/japan-hotel-research/"
 
 cat >"$PROFILE_HOME/config.yaml" <<'EOCFG'
 model:
@@ -97,6 +99,9 @@ quick_commands:
   github-discovery:
     type: alias
     target: /background /github-discovery
+plugins:
+  enabled:
+    - japan-hotel-research
 approvals:
   mode: manual
   timeout: 60
@@ -224,4 +229,5 @@ Next steps:
    bash /workspace/hermes-agent-plugin/scripts/herprofile_start.sh $PROFILE_NAME
 4. In Telegram, test:
    /github-discovery
+   /japan-hotel-research
 EOF3

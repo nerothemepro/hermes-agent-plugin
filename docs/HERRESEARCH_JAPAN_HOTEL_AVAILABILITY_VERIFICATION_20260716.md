@@ -51,3 +51,50 @@ The smoke inspected only the first three visible results. Examples included list
 1. Booking.com's anonymous flow is unstable in this environment. Keep it fail-closed until a future read-only smoke proves all required criteria survive submission.
 2. The Jalan CLI's free-form `Tokyo` area resolution may broaden to the prefecture. Prefer a more specific area such as Shinjuku, Shibuya, or a known Jalan region name when precise matching is required.
 3. Prices and inventory are volatile. A saved artifact proves only the observed state at its runtime timestamp, not future availability.
+
+## Command Workflow Verification
+
+### Root Cause And Fix
+
+The failed Telegram prompt was caused by LLM-dependent tool routing: the local Gemma model invented an unavailable `oarai_camp_availability_tool`, then returned a promise instead of executing evidence-producing tools. The fix is a native Hermes plugin command, `/japan-hotel-research`, whose handler validates the operator payload and invokes the bounded Jalan and Playwright lanes directly. The command does not enter the LLM conversation loop.
+
+### Live Command Smoke
+
+Input:
+
+```text
+/japan-hotel-research kiểm tra phòng trống theo thông tin sau:
+Khu vực: Tateyama,Chiba,Nhật Bản
+Checkin: 2026-08-15
+Checkout: 2026-08-16
+Người lớn: 2
+Trẻ em: 2 tuổi + 9 tuổi
+Số phòng: 1
+```
+
+Observed result:
+
+- Overall status: `partial`.
+- Jalan.net: `no_results`; Tateyama resolved to Jalan area `館山` under Chiba region `LRG_122600`.
+- Airbnb Japan: `completed`; three anonymous Tateyama listings were returned with direct listing URLs.
+- Booking.com: `blocked`; the site reset or failed to retain the full date and child occupancy criteria after submission, so landing-page prices were rejected.
+- Evidence JSON: `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/20260716T055541196175Z/report.json`.
+- Live command output: `/tmp/herresearch-japan-command-live-smoke.txt`.
+
+### Deployment And Rollback
+
+- Plugin path: `/opt/data/hermes-profiles/herresearch/plugins/japan-hotel-research`.
+- Hermes command discovery: `japan-hotel-research`.
+- HerResearch gateway restored, restarted, and reconnected with current PID `167508`.
+- Existing HerResearch `.env` hash remained unchanged.
+- Durable rollback script from the original deployment: `/opt/data/hermes/control-plane/backups/herresearch-hotel-availability-20260716T060152621395720Z/rollback.sh`.
+- Telegram registered 60 visible commands and hid 66 because of the platform menu limit. The hyphenated command remains callable when typed manually and is listed by the full `/commands` output.
+
+### Verification Results
+
+- Native workflow parser/contract tests: `6/6` passed.
+- Hermes Agent plugin test suite: `49/49` passed.
+- Jalan Tateyama resolver test: `1/1` passed.
+- Jalan live read-only smoke evidence: `/tmp/jalan-tateyama-20260716-smoke.json`; SHA-256 `b6abb113b68786390b3a8cbc5a7f23b4c25c9a547cd00ffff0c49967aacb0e9a`.
+- Plugin manifest validation, Python bytecode compilation, shell syntax checks, and SDTK skill validation passed.
+- No login, booking, payment, account mutation, or message action was performed.
