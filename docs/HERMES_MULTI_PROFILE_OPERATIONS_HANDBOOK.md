@@ -328,8 +328,9 @@ This command bypasses the LLM and executes the deterministic workflow directly. 
 
 Routing is intentionally asymmetric:
 
-- Jalan.net uses the deterministic `/workspace/jalan-room-search-tool/bin/jalan-room-search` CLI.
-- Booking.com and Airbnb Japan use the existing Playwright MCP with direct search URLs first and bounded form interaction only when needed.
+- Jalan.net uses the deterministic `/workspace/jalan-room-search-tool/bin/jalan-room-search` CLI and parses current `.js-searchResultItem` cards.
+- Airbnb Japan uses the existing bounded headless Playwright MCP.
+- Booking.com uses the plugin-bundled standard headed Chromium MCP under Xvfb. Headless Booking sessions on this box drop dates and children, so the installer requires `xvfb-run` and the lane fails closed if criteria are not retained.
 - The Playwright include list adds only `browser_type`, `browser_fill_form`, `browser_select_option`, `browser_tabs`, and `browser_take_screenshot`.
 
 The workflow is search-only. It must stop on CAPTCHA/login/access denial and must never book, reserve, pay, message, create an account, upload files, change browser storage, or use private/undocumented APIs.

@@ -39,7 +39,7 @@ For Hermes fleet/browser/wiki diagnosis, read `/workspace/hermes-agent-plugin/do
 ## Core Rules
 
 - Prefer deterministic CLI tools when a site-specific helper exists.
-- For Jalan.net room searches, call `/workspace/jalan-room-search-tool/bin/jalan-room-search` instead of generating selectors. Use the bounded Playwright MCP for Booking.com and Airbnb Japan.
+- For Jalan.net room searches, call `/workspace/jalan-room-search-tool/bin/jalan-room-search` instead of generating selectors. Use bounded Playwright MCP lanes: headed/Xvfb for Booking.com and headless for Airbnb Japan.
 - `/japan-hotel-research` is the production hotel entry point and runs outside the LLM tool-selection loop. Do not reinterpret or replace its command contract.
 - Hotel workflows stop at read-only search and reporting. Never log in, book, reserve, pay, message, create accounts, or bypass CAPTCHA/access controls.
 - Do not hallucinate inaccessible web or Facebook content.

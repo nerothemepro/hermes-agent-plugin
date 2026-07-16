@@ -48,11 +48,17 @@ test('profile installer installs the hotel skill without secret literals', () =>
 test('native Telegram command bypasses LLM routing and is deployed reversibly', () => {
   const plugin = read('hermes-plugin/japan_hotel_research/__init__.py');
   const manifest = read('hermes-plugin/japan_hotel_research/plugin.yaml');
+  const bookingServer = read('hermes-plugin/japan_hotel_research/booking_mcp_server.sh');
+  const bookingConfig = read('hermes-plugin/japan_hotel_research/booking-playwright-mcp.json');
   const deploymentInstaller = read('scripts/install_herresearch_hotel_availability.sh');
   const profileInstaller = read('scripts/install_herresearch_profile.sh');
 
   assert.match(plugin, /register_command\(\s*["']japan-hotel-research["']/s);
   assert.match(manifest, /name:\s*japan-hotel-research/);
+  assert.match(bookingServer, /xvfb-run/);
+  assert.match(bookingConfig, /"headless": false/);
+  assert.match(deploymentInstaller, /xvfb-run/);
+  assert.match(profileInstaller, /xvfb-run/);
   assert.match(deploymentInstaller, /plugins\/japan-hotel-research/);
   assert.match(deploymentInstaller, /plugins\.enabled|setdefault\(["']plugins["']/);
   assert.match(deploymentInstaller, /rollback\.sh/);

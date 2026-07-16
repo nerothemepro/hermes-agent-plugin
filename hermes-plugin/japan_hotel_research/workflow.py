@@ -11,6 +11,7 @@ import json
 import os
 import re
 import select
+import signal
 import subprocess
 import time
 import unicodedata
@@ -23,6 +24,7 @@ from urllib.parse import quote, urlencode
 
 JALAN_CLI = Path(os.getenv("JAPAN_HOTEL_JALAN_CLI", "/workspace/jalan-room-search-tool/bin/jalan-room-search"))
 MCP_SERVER = Path(os.getenv("JAPAN_HOTEL_MCP_SERVER", "/workspace/hermes-agent-plugin/scripts/playwright_mcp_server.sh"))
+BOOKING_MCP_SERVER = Path(__file__).with_name("booking_mcp_server.sh")
 REPORT_ROOT = Path(os.getenv("JAPAN_HOTEL_REPORT_ROOT", "/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research"))
 SITE_TIMEOUT_SECONDS = 75
 BLOCK_MARKERS = ("captcha", "verify you are human", "access denied", "robot check", "ログインしてください")
@@ -263,18 +265,35 @@ def _refs_for_lines(snapshot: str, required: tuple[str, ...]) -> list[str]:
     return refs
 
 
+def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
+
 class McpClient:
-    def __init__(self, stderr_path: Path, lifetime_seconds: int = 110):
+    def __init__(self, stderr_path: Path, lifetime_seconds: int = 110, server_path: Path = MCP_SERVER):
         self.deadline = time.monotonic() + lifetime_seconds
         self.stderr_handle = stderr_path.open("w", encoding="utf-8")
         self.proc = subprocess.Popen(
-            [str(MCP_SERVER)],
+            [str(server_path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=self.stderr_handle,
             text=True,
             bufsize=1,
             env=_safe_subprocess_env(),
+            start_new_session=True,
         )
         self.next_id = 1
         self.request(
@@ -332,12 +351,7 @@ class McpClient:
         except Exception:
             pass
         if self.proc.poll() is None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.wait(timeout=5)
+            _terminate_process_group(self.proc)
         self.stderr_handle.close()
 
     def __enter__(self) -> "McpClient":
@@ -489,15 +503,34 @@ def run_airbnb(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     }
 
 
-def _booking_date_label(iso_value: str) -> str:
-    parsed = date.fromisoformat(iso_value)
-    return parsed.strftime("%A, %B %-d, %Y")
-
-
 def _booking_selected_date_text(request: HotelRequest) -> str:
     checkin = date.fromisoformat(request.checkin).strftime("%a, %b %-d")
     checkout = date.fromisoformat(request.checkout).strftime("%a, %b %-d")
     return f"{checkin} — {checkout}"
+
+
+def build_booking_search_url(request: HotelRequest) -> str:
+    room_members = (["A"] * request.adults) + [str(age) for age in request.children_ages]
+    params: list[tuple[str, str | int]] = [
+        ("ss", request.area),
+        ("checkin", request.checkin),
+        ("checkout", request.checkout),
+        ("group_adults", request.adults),
+        ("req_adults", request.adults),
+        ("no_rooms", request.rooms),
+        ("group_children", len(request.children_ages)),
+        ("req_children", len(request.children_ages)),
+    ]
+    params.extend(("age", age) for age in request.children_ages)
+    params.extend(
+        [
+            ("room1", ",".join(room_members)),
+            ("sb_price_type", "total"),
+            ("type", "total"),
+            ("selected_currency", "JPY"),
+        ]
+    )
+    return "https://www.booking.com/searchresults.html?" + urlencode(params)
 
 
 def _booking_extract_results(snapshot: str, max_results: int) -> list[dict[str, str]]:
@@ -505,20 +538,22 @@ def _booking_extract_results(snapshot: str, max_results: int) -> list[dict[str, 
     results: list[dict[str, str]] = []
     seen: set[str] = set()
     for index, line in enumerate(lines):
-        match = re.search(r"/url:\s*(https://www\.booking\.com/hotel/jp/[^\s\"]+)", line)
-        if not match:
+        heading = re.search(r'link "(.+?) Opens in new window"', line)
+        if not heading:
             continue
-        url = match.group(1)
+        block = "\n".join(lines[index : min(len(lines), index + 80)])
+        url_match = re.search(r"/url:\s*(https://www\.booking\.com/hotel/jp/[^\s\"]+)", block)
+        if not url_match:
+            continue
+        url = url_match.group(1)
         base = url.split("?", 1)[0]
         if base in seen:
             continue
         seen.add(base)
-        block = "\n".join(lines[index : min(len(lines), index + 40)])
-        heading = re.search(r'heading "([^"]+)"', block)
         price = re.search(r"(?:US\$|¥|JPY)\s?[\d,]+", block)
         results.append(
             {
-                "name": heading.group(1) if heading else "Booking.com property",
+                "name": heading.group(1),
                 "price": price.group(0) if price else "",
                 "url": url,
                 "availability": "",
@@ -529,141 +564,64 @@ def _booking_extract_results(snapshot: str, max_results: int) -> list[dict[str, 
     return results
 
 
-def _booking_click_ref(client: McpClient, snapshot: str, required: tuple[str, ...], label: str) -> str:
-    ref = _ref_for_line(snapshot, required)
-    if not ref:
-        raise RuntimeError(f"Không tìm thấy {label}.")
-    client.tool("browser_click", {"target": ref, "element": label}, timeout=30)
-    return ref
-
-
 def run_booking(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
     stderr_path = artifact_dir / "booking-mcp.stderr"
-    snapshot = ""
+    search_url = build_booking_search_url(request)
     try:
-        with McpClient(stderr_path) as client:
-            client.tool("browser_navigate", {"url": "https://www.booking.com/searchresults.html"}, timeout=90)
-            client.tool("browser_wait_for", {"time": 3}, timeout=15)
+        with McpClient(stderr_path, server_path=BOOKING_MCP_SERVER, lifetime_seconds=130) as client:
+            client.tool("browser_navigate", {"url": search_url}, timeout=90)
+            client.tool("browser_wait_for", {"time": 10}, timeout=20)
             snapshot = client.snapshot()
-            if _contains_block_marker(snapshot):
-                raise RuntimeError("Booking.com hiển thị CAPTCHA/login/block.")
-
-            destination_ref = _ref_for_line(snapshot, ("combobox", "enter destination"))
-            if not destination_ref:
-                raise RuntimeError("Không tìm thấy ô Enter destination.")
-            client.tool(
-                "browser_type",
-                {"target": destination_ref, "element": "Enter destination", "text": request.area, "slowly": True},
-                timeout=30,
-            )
-            client.tool("browser_wait_for", {"time": 2}, timeout=10)
-            snapshot = client.snapshot()
-            option_ref = _ref_for_line(snapshot, ("option", _fold(request.area.split(",")[0])))
-            if not option_ref:
-                option_refs = _refs_for_lines(snapshot, ("option",))
-                option_ref = option_refs[0] if option_refs else None
-            if not option_ref:
-                raise RuntimeError("Booking.com không trả destination suggestion.")
-            client.tool("browser_click", {"target": option_ref, "element": "Destination suggestion"}, timeout=30)
-
-            snapshot = client.snapshot()
-            _booking_click_ref(client, snapshot, ("button", "select dates"), "date picker")
-            snapshot = client.snapshot()
-            for iso_value in (request.checkin, request.checkout):
-                label = _booking_date_label(iso_value)
-                ref = _ref_for_line(snapshot, ("checkbox", label))
-                next_clicks = 0
-                while not ref and next_clicks < 18:
-                    next_ref = _ref_for_line(snapshot, ("button", "next month"))
-                    if not next_ref:
-                        break
-                    client.tool("browser_click", {"target": next_ref, "element": "Next month"}, timeout=20)
-                    snapshot = client.snapshot()
-                    ref = _ref_for_line(snapshot, ("checkbox", label))
-                    next_clicks += 1
-                if not ref:
-                    raise RuntimeError(f"Không tìm thấy ngày {iso_value} trong date picker.")
-                client.tool("browser_click", {"target": ref, "element": label}, timeout=30)
-                snapshot = client.snapshot()
-
-            occupancy_ref = _ref_for_line(snapshot, ("button", "number of travelers and rooms"))
-            if not occupancy_ref:
-                raise RuntimeError("Không tìm thấy occupancy selector.")
-            client.tool("browser_click", {"target": occupancy_ref, "element": "Occupancy selector"}, timeout=30)
-            snapshot = client.snapshot()
-
-            deltas = {
-                "Adults": request.adults - 2,
-                "Children": len(request.children_ages),
-                "Rooms": request.rooms - 1,
-            }
-            for category, delta in deltas.items():
-                direction = "Increase" if delta >= 0 else "Decrease"
-                for _ in range(abs(delta)):
-                    ref = _ref_for_line(snapshot, ("button", direction, category))
-                    if not ref:
-                        ref = _ref_near_section(snapshot, category, ("button", direction))
-                    if not ref:
-                        ref = _stepper_ref(snapshot, category, increase=delta > 0)
-                    if not ref:
-                        raise RuntimeError(f"Không tìm thấy nút {direction} {category}.")
-                    client.tool("browser_click", {"target": ref, "element": f"{direction} {category}"}, timeout=20)
-                    snapshot = client.snapshot()
-
-            age_refs = _refs_for_lines(snapshot, ("combobox", "age"))
-            if request.children_ages and len(age_refs) < len(request.children_ages):
-                raise RuntimeError("Booking.com không hiển thị đủ ô tuổi trẻ em.")
-            for ref, age in zip(age_refs, request.children_ages):
-                client.tool(
-                    "browser_select_option",
-                    {"target": ref, "element": "Child age", "values": [str(age)]},
-                    timeout=20,
-                )
-                snapshot = client.snapshot()
-
-            done_ref = _ref_for_line(snapshot, ("button", "done"))
-            if done_ref:
-                client.tool("browser_click", {"target": done_ref, "element": "Occupancy done"}, timeout=20)
-                snapshot = client.snapshot()
-
-            pre_submit = snapshot
-            search_ref = _ref_for_line(pre_submit, ("button", "search"))
-            if not search_ref:
-                raise RuntimeError("Không tìm thấy nút Search.")
-            client.tool("browser_click", {"target": search_ref, "element": "Search"}, timeout=45)
-            client.tool("browser_wait_for", {"time": 5}, timeout=15)
-            final_snapshot = client.snapshot()
     except Exception as exc:
-        if snapshot:
-            last_snapshot = artifact_dir / "booking-last-snapshot.txt"
-            last_snapshot.write_text(snapshot, encoding="utf-8")
-            os.chmod(last_snapshot, 0o600)
         return {"status": "blocked", "results": [], "warnings": [f"Booking.com dừng an toàn: {exc}"], "errors": []}
 
-    (artifact_dir / "booking-pre-submit.txt").write_text(pre_submit, encoding="utf-8")
-    (artifact_dir / "booking-final-snapshot.txt").write_text(final_snapshot, encoding="utf-8")
-    final_url = _page_url(final_snapshot)
+    final_url = _page_url(snapshot)
     selected_dates = _booking_selected_date_text(request)
     selected_occupancy = (
         f"{request.adults} adults · {len(request.children_ages)} children · "
         f"{request.rooms} {'room' if request.rooms == 1 else 'rooms'}"
     )
-    criteria_retained = (
-        request.area.split(",")[0].lower() in final_snapshot.lower()
-        and selected_dates in final_snapshot
-        and selected_occupancy in final_snapshot
+    required_url_parts = (
+        f"checkin={request.checkin}",
+        f"checkout={request.checkout}",
+        f"group_adults={request.adults}",
+        f"group_children={len(request.children_ages)}",
+        f"no_rooms={request.rooms}",
     )
-    if _contains_block_marker(final_snapshot):
+    criteria_retained = (
+        all(part in final_url for part in required_url_parts)
+        and final_url.count("age=") == len(request.children_ages)
+        and request.area.split(",")[0].lower() in snapshot.lower()
+        and selected_dates in snapshot
+        and selected_occupancy in snapshot
+    )
+    if _contains_block_marker(snapshot):
         return {"status": "blocked", "results": [], "warnings": ["Booking.com hiển thị CAPTCHA/login/block."], "errors": [], "final_url": final_url}
     if not criteria_retained:
         return {
             "status": "blocked",
             "results": [],
-            "warnings": ["Booking.com reset hoặc không chứng minh được đầy đủ khu vực, ngày và số khách sau submit; bỏ qua giá landing page."],
+            "warnings": ["Booking.com không giữ đầy đủ khu vực, ngày, số khách và tuổi trẻ em trong headed session; bỏ qua inventory."],
             "errors": [],
             "final_url": final_url,
         }
-    results = _booking_extract_results(final_snapshot, request.max_results_per_site)
+
+    results = _booking_extract_results(snapshot, request.max_results_per_site)
+    criteria_artifact = artifact_dir / "booking-criteria.json"
+    criteria_artifact.write_text(
+        json.dumps(
+            {
+                "final_url": final_url,
+                "selected_dates": selected_dates,
+                "selected_occupancy": selected_occupancy,
+                "results": results,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(criteria_artifact, 0o600)
     return {
         "status": "completed" if results else "no_results",
         "results": results,
@@ -671,7 +629,6 @@ def run_booking(request: HotelRequest, artifact_dir: Path) -> dict[str, Any]:
         "errors": [],
         "final_url": final_url,
     }
-
 
 def _overall_status(sites: dict[str, dict[str, Any]]) -> str:
     statuses = {site.get("status") for site in sites.values()}
@@ -692,6 +649,7 @@ def format_vietnamese_report(request: HotelRequest, report: dict[str, Any]) -> s
             f"{request.adults} người lớn | trẻ em {request.children_ages or 'không'} | "
             f"{request.rooms} phòng"
         ),
+        f"Evidence JSON: {report.get('artifact_path', '')}",
         "",
     ]
     for key in ("jalan", "airbnb", "booking"):
@@ -709,7 +667,6 @@ def format_vietnamese_report(request: HotelRequest, report: dict[str, Any]) -> s
         lines.append("")
     lines.extend(
         [
-            f"Evidence JSON: {report.get('artifact_path', '')}",
             "Chỉ kiểm tra read-only; không đăng nhập, không đặt phòng và không thanh toán.",
             "Giá/phòng trống có thể thay đổi, hãy xác nhận lại trên website trước khi quyết định.",
         ]

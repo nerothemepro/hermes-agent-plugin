@@ -21,6 +21,8 @@ RUNTIME_SCRIPTS_DIR="${HERMES_RUNTIME_SCRIPTS_DIR:-/workspace/hermes-agent-plugi
 [[ -f "$PROFILE_HOME/config.yaml" ]] || { echo "Missing $PROFILE_HOME/config.yaml" >&2; exit 2; }
 [[ -f "$SKILL_SOURCE/SKILL.md" ]] || { echo "Missing source skill at $SKILL_SOURCE" >&2; exit 2; }
 [[ -f "$PLUGIN_SOURCE/plugin.yaml" && -f "$PLUGIN_SOURCE/workflow.py" ]] || { echo "Missing native command plugin at $PLUGIN_SOURCE" >&2; exit 2; }
+[[ -x "$PLUGIN_SOURCE/booking_mcp_server.sh" && -f "$PLUGIN_SOURCE/booking-playwright-mcp.json" ]] || { echo "Missing headed Booking MCP bundle at $PLUGIN_SOURCE" >&2; exit 2; }
+command -v xvfb-run >/dev/null 2>&1 || { echo "xvfb-run is required for Booking.com headed browser" >&2; exit 2; }
 [[ -x "$JALAN_CLI" ]] || { echo "Missing executable Jalan CLI at $JALAN_CLI" >&2; exit 2; }
 [[ -x "$HERMES_PYTHON" ]] || { echo "Missing Hermes Python at $HERMES_PYTHON" >&2; exit 2; }
 [[ -x "$RUNTIME_SCRIPTS_DIR/herprofile_stop.sh" && -x "$RUNTIME_SCRIPTS_DIR/herprofile_start.sh" ]] || { echo "Missing stable profile wrappers at $RUNTIME_SCRIPTS_DIR" >&2; exit 2; }

@@ -23,7 +23,7 @@ HerResearch does not depend on prior chat history. It reads only task-relevant r
 ## Operating Rules
 
 - Prefer deterministic helpers before freestyle browser work.
-- For Japan room availability, load `japan-hotel-availability`. Route Jalan.net to `/workspace/jalan-room-search-tool/bin/jalan-room-search`; use bounded Playwright MCP actions for Booking.com and Airbnb Japan.
+- For Japan room availability, load `japan-hotel-availability`. Route Jalan.net to `/workspace/jalan-room-search-tool/bin/jalan-room-search`; use bounded Playwright MCP actions, with headed/Xvfb for Booking.com and headless for Airbnb Japan.
 - For operator hotel checks, prefer native `/japan-hotel-research`; it bypasses LLM routing and runs the validated deterministic workflow.
 - Room searches are read-only. Never log in, book, reserve, pay, message, create an account, bypass CAPTCHA, or use undocumented/private APIs.
 - `/github-discovery` stays deterministic and report-first.

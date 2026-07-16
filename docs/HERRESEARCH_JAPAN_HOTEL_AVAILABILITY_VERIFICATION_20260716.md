@@ -2,11 +2,11 @@
 
 ## Verdict
 
-`DEPLOYED_WITH_ONE_SITE_BLOCKED`
+`DEPLOYED_ALL_SITES_COMPLETED`
 
-The read-only workflow is installed for HerResearch. Airbnb Japan returned matching anonymous inventory, Jalan returned a valid structured `no_results` response, and Booking.com accepted the client-side criteria but stripped the selected dates after form submission. Booking must therefore report `blocked` or `partial`; its landing-page prices are not matching availability evidence.
+The latest deployed native command completed all three read-only provider lanes for the fixed Tateyama family criteria. The initial blocked/no-results evidence is retained below as historical evidence and is superseded by the regression verification section.
 
-## Fixed Smoke Criteria
+## Initial Fixed Smoke Criteria (Historical)
 
 - Area: Tokyo, Japan
 - Check-in: 2026-08-15
@@ -26,7 +26,7 @@ The read-only workflow is installed for HerResearch. Airbnb Japan returned match
 - Existing `.env` SHA-256 was unchanged across deployment.
 - Rollback script: `/opt/data/hermes/control-plane/backups/herresearch-hotel-availability-20260716T042808309728495Z/rollback.sh`.
 
-## Site Matrix
+## Initial Site Matrix (Historical)
 
 | Site | Result | Evidence | Interpretation |
 |---|---|---|---|
@@ -48,8 +48,8 @@ The smoke inspected only the first three visible results. Examples included list
 
 ## Residual Risks
 
-1. Booking.com's anonymous flow is unstable in this environment. Keep it fail-closed until a future read-only smoke proves all required criteria survive submission.
-2. The Jalan CLI's free-form `Tokyo` area resolution may broaden to the prefecture. Prefer a more specific area such as Shinjuku, Shibuya, or a known Jalan region name when precise matching is required.
+1. Booking.com requires standard headed Chromium under Xvfb on this box. The installer fails closed if `xvfb-run` is unavailable, and the lane still rejects results whenever any criterion is lost.
+2. Jalan DOM classes and plan-link shapes can change. The current-card fixture and exact live smoke must be rerun after parser changes.
 3. Prices and inventory are volatile. A saved artifact proves only the observed state at its runtime timestamp, not future availability.
 
 ## Command Workflow Verification
@@ -58,7 +58,7 @@ The smoke inspected only the first three visible results. Examples included list
 
 The failed Telegram prompt was caused by LLM-dependent tool routing: the local Gemma model invented an unavailable `oarai_camp_availability_tool`, then returned a promise instead of executing evidence-producing tools. The fix is a native Hermes plugin command, `/japan-hotel-research`, whose handler validates the operator payload and invokes the bounded Jalan and Playwright lanes directly. The command does not enter the LLM conversation loop.
 
-### Live Command Smoke
+### Initial Live Command Smoke (Superseded)
 
 Input:
 
@@ -98,3 +98,46 @@ Observed result:
 - Jalan live read-only smoke evidence: `/tmp/jalan-tateyama-20260716-smoke.json`; SHA-256 `b6abb113b68786390b3a8cbc5a7f23b4c25c9a547cd00ffff0c49967aacb0e9a`.
 - Plugin manifest validation, Python bytecode compilation, shell syntax checks, and SDTK skill validation passed.
 - No login, booking, payment, account mutation, or message action was performed.
+
+## Regression Fix Verification - 2026-07-16
+
+### Root Causes
+
+1. Jalan returned a false `no_results`. The live `LRG_122600` page contained available plans, prices, and availability markers, but the legacy parser did not recognize the current `.js-searchResultItem` cards or `/uw/uwp3200/uww3201init.do` plan links.
+2. Booking.com degraded anonymous Chromium headless searches to destination-only state. The same public URL under standard headed Chromium/Xvfb retained check-in, checkout, adults, both child ages, and room count and returned priced property cards.
+3. The evidence path appeared blank at the end of a long Telegram response. It is now emitted before site details so Telegram chunking cannot separate the label from its value.
+4. The initial headed wrapper left an Xvfb orphan when only the wrapper PID was terminated. MCP processes now start in a new session and close through process-group termination.
+
+### Latest End-To-End Result
+
+- Overall status: `completed`.
+- Jalan.net: `completed`, 3 displayed results from 30 parsed properties.
+- Airbnb Japan: `completed`, 3 displayed listings.
+- Booking.com: `completed`, 3 priced properties with full criteria retained.
+- Canonical evidence JSON: `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/20260716T072117902220Z/report.json`; SHA-256 `0d6468c4f47c52f1812cf893b6904aea9f7d724deeecbf5bf51c5487009520a7`.
+- Operator output artifact: `/tmp/japan-hotel-command-fixed-live2.txt`.
+- Current HerResearch gateway PID after final source-parity deployment: `200267`.
+- Durable rollback: `/opt/data/hermes/control-plane/backups/herresearch-hotel-availability-20260716T072642186624523Z/rollback.sh`.
+
+Observed price samples at verification time:
+
+| Site | Property | Displayed price / availability |
+|---|---|---|
+| Jalan.net | グランドメルキュール南房総リゾート＆スパ | `¥152,670`, あと1部屋 |
+| Jalan.net | AIHAMA TERRACE | `¥110,000`, あと1部屋 |
+| Booking.com | 青と夕日 | `¥35,200` |
+| Booking.com | Tateyama Resort Hotel | `¥78,710` |
+
+These values are volatile observations, not price guarantees.
+
+### Regression Evidence
+
+- Jalan current-card parser fixture: pass.
+- Jalan exact live query: `completed`, 30 results before output limit.
+- Booking headed-MCP exact lane: `completed`, 3 results and criteria URL retained.
+- Native workflow tests: `10/10` passed.
+- Hermes Agent plugin suite: `49/49` passed.
+- Xvfb process count after full command: `0`.
+- Zombie process count after full command: `0`.
+- HerResearch `.env` hash unchanged.
+- No login, booking, payment, account mutation, message action, CAPTCHA bypass, stealth browser, or private API was used.

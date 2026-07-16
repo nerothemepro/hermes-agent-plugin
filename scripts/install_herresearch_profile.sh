@@ -13,6 +13,8 @@ REDDIT_CLIENT_SECRET_VALUE="${REDDIT_CLIENT_SECRET:-}"
 REDDIT_USER_AGENT_VALUE="${REDDIT_USER_AGENT:-herresearch-readonly/1.0}"
 TAVILY_API_KEY_VALUE="${TAVILY_API_KEY:-}"
 
+command -v xvfb-run >/dev/null 2>&1 || { echo "xvfb-run is required for Booking.com headed browser" >&2; exit 2; }
+
 mkdir -p "$PROFILE_HOME"/{logs,sessions,memories,skills,cache,reports,workspace,hooks,audio_cache,image_cache,pairing,cron,bin,sandboxes}
 
 cp /workspace/hermes-agent-plugin/docs/HERRESEARCH_PROFILE.md "$PROFILE_HOME/PROFILE.md"
