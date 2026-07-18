@@ -72,6 +72,29 @@ DEFAULT_INTERP_MODEL = "rife_v4.26.safetensors"
 # node + codeformer model in the ComfyUI container; gated OFF by default via the
 # LTX_FACE_RESTORE env so renders never break when the node is absent.
 DEFAULT_FACE_RESTORE_MODEL = "codeformer.pth"
+
+# Anime detail restoration. CodeFormer only works on real human faces, so it is
+# disabled for anime/cartoon content — leaving motion-blurred anime faces with no
+# restorer (the "cat face melts during the leap" problem). RealESRGAN
+# AnimeVideo-v3 is an anime-specialised per-frame upscaler that re-injects
+# line/detail; run it right after VAE decode (before RIFE) so interpolation works
+# on already-sharpened frames. Gated on the model being installed in ComfyUI so
+# renders never break when it is absent (auto-falls back to no restore).
+DEFAULT_ANIME_UPSCALE_MODEL = "realesr-animevideov3.pth"
+
+# LTX 2.3 two-stage latent refine. Post-decode restorers (RIFE/ESRGAN) cannot
+# fix structure that was ALREADY generated deformed: at low native fps a fast
+# action spans only a few generated frames, so the sampler hallucinates large
+# pose jumps and small moving subjects lose their shape. The native LTX latent
+# upsamplers attack this at the generation level: temporal x2 doubles the frame
+# rate in latent space, spatial x2 doubles resolution; a second low-denoise
+# KSampler pass (distilled LoRA already loaded) then re-draws detail coherently
+# on the upscaled latent. Both stages are env-gated and auto-detected via
+# /object_info so renders never break when the models are absent.
+DEFAULT_TEMPORAL_UPSCALER_MODEL = "ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
+DEFAULT_SPATIAL_UPSCALER_MODEL = "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+LATENT_UPSAMPLER_CLASS = "LTXVLatentUpsampler"
+LATENT_UPSCALE_LOADER_CLASS = "LatentUpscaleModelLoader"
 DEFAULT_FACE_DETECTION = "retinaface_resnet50"
 # CodeFormer fidelity: 0=max restoration (sharper, may drift identity),
 # 1=max fidelity to input. 0.5 balances sharpness vs identity for video.
@@ -96,7 +119,8 @@ ANIMATION_EXTRA_NEGATIVE = (
 
 # interp = RIFE frame multiplier (1 = off). 8fps x 3 = 24fps cinematic output.
 MODE_PRESETS: dict[str, dict[str, Any]] = {
-    "test": {"width": 512, "height": 320, "duration": 1, "fps": 8, "steps": 1, "prompt_enhance": False, "interp": 1},
+    # test: enough steps/interp for visual quality evaluation; not for production
+    "test": {"width": 512, "height": 320, "duration": 2, "fps": 8, "steps": 8, "prompt_enhance": False, "interp": 3},
     "standard": {"width": 512, "height": 320, "duration": 3, "fps": 8, "steps": 12, "prompt_enhance": False, "interp": 3},
     # quality envelope proven on RTX 3090: 768x512 @ 8fps native, then RIFE x3 ->
     # 24fps in post. Steps raised 20->26 for sharper in-motion facial detail.
@@ -180,6 +204,10 @@ def run_keyframe_generator(args: argparse.Namespace, env: dict[str, str], base: 
         ])
     if getattr(args, "keyframe_seed", None) is not None:
         cmd.extend(["--seed", str(args.keyframe_seed)])
+    # FLUX.1-Redux reference: condition this shot's fresh keyframe on the approved
+    # keyframe so the character/style stays consistent across shots.
+    if getattr(args, "redux_reference", "") and not use_animagine_path:
+        cmd.extend(["--redux-reference", args.redux_reference])
     if Path(args.env_file).exists():
         cmd.extend(["--env-file", args.env_file])
     proc = subprocess.run(
@@ -245,6 +273,9 @@ def patch_ltx_workflow(
     env: dict[str, str],
     interp_multiplier: int = 1,
     face_restore: bool = False,
+    anime_upscale: bool = False,
+    temporal_refine: bool = False,
+    spatial_refine: bool = False,
 ) -> dict[str, Any]:
     patched = copy.deepcopy(workflow)
     checkpoint = cfg(env, "LTX_CHECKPOINT_NAME", LTX_CHECKPOINT)
@@ -276,16 +307,112 @@ def patch_ltx_workflow(
     set_node_input(patched, "VAEDecodeTiled", "overlap", int(cfg(env, "LTX_VAE_OVERLAP", "64")))
     set_node_input(patched, "VAEDecodeTiled", "temporal_size", int(cfg(env, "LTX_VAE_TEMPORAL_SIZE", "32")))
     set_node_input(patched, "VAEDecodeTiled", "temporal_overlap", int(cfg(env, "LTX_VAE_TEMPORAL_OVERLAP", "8")))
-    create_fps = float(fps)
+    # Two-stage latent refine: KSampler -> [temporal x2] -> [spatial x2] ->
+    # second ModelSamplingLTXV/KSampler pass at low denoise -> VAEDecodeTiled.
+    # The refine pass uses plain text conditioning (the I2V image guide belongs
+    # to the base-resolution latent) at the post-upsample frame rate.
+    effective_fps = float(fps)
+    out_width, out_height = width, height
+    if temporal_refine or spatial_refine:
+        ks_id = next((nid for nid, _ in iter_nodes(patched, "KSampler")), None)
+        ms_id = next((nid for nid, _ in iter_nodes(patched, "ModelSamplingLTXV")), None)
+        cond_id = next((nid for nid, _ in iter_nodes(patched, "LTXVConditioning")), None)
+        dec_id = next((nid for nid, _ in iter_nodes(patched, "VAEDecodeTiled")), None)
+        if ks_id is None or ms_id is None or cond_id is None or dec_id is None:
+            raise PipelineError("LTX workflow missing KSampler/ModelSamplingLTXV/LTXVConditioning/VAEDecodeTiled; cannot add latent refine")
+        vae_link = patched[dec_id]["inputs"]["vae"]
+        model_link = patched[ms_id]["inputs"]["model"]
+        pos_link = patched[cond_id]["inputs"]["positive"]
+        neg_link = patched[cond_id]["inputs"]["negative"]
+        latent_source = ks_id
+        if temporal_refine:
+            patched["temporal_up_loader"] = {
+                "class_type": LATENT_UPSCALE_LOADER_CLASS,
+                "inputs": {"model_name": cfg(env, "LTX_TEMPORAL_UPSCALER_MODEL", DEFAULT_TEMPORAL_UPSCALER_MODEL)},
+            }
+            patched["temporal_up"] = {
+                "class_type": LATENT_UPSAMPLER_CLASS,
+                "inputs": {"samples": [latent_source, 0], "upscale_model": ["temporal_up_loader", 0], "vae": vae_link},
+            }
+            latent_source = "temporal_up"
+            effective_fps *= 2.0
+        if spatial_refine:
+            patched["spatial_up_loader"] = {
+                "class_type": LATENT_UPSCALE_LOADER_CLASS,
+                "inputs": {"model_name": cfg(env, "LTX_SPATIAL_UPSCALER_MODEL", DEFAULT_SPATIAL_UPSCALER_MODEL)},
+            }
+            patched["spatial_up"] = {
+                "class_type": LATENT_UPSAMPLER_CLASS,
+                "inputs": {"samples": [latent_source, 0], "upscale_model": ["spatial_up_loader", 0], "vae": vae_link},
+            }
+            latent_source = "spatial_up"
+            out_width, out_height = width * 2, height * 2
+        patched["refine_cond"] = {
+            "class_type": "LTXVConditioning",
+            "inputs": {"positive": pos_link, "negative": neg_link, "frame_rate": effective_fps},
+        }
+        patched["refine_sampling"] = {
+            "class_type": "ModelSamplingLTXV",
+            "inputs": {
+                "model": model_link,
+                "latent": [latent_source, 0],
+                "max_shift": float(cfg(env, "LTX_MAX_SHIFT", "2.05")),
+                "base_shift": float(cfg(env, "LTX_BASE_SHIFT", "0.95")),
+            },
+        }
+        patched["refine_sampler"] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["refine_sampling", 0],
+                "seed": seed + 1,
+                "steps": int(cfg(env, "LTX_REFINE_STEPS", "8")),
+                "cfg": float(cfg(env, "LTX_CFG", "1.0")),
+                "sampler_name": cfg(env, "LTX_SAMPLER_NAME", "euler"),
+                "scheduler": cfg(env, "LTX_SCHEDULER", "simple"),
+                "positive": ["refine_cond", 0],
+                "negative": ["refine_cond", 1],
+                "latent_image": [latent_source, 0],
+                "denoise": float(cfg(env, "LTX_REFINE_DENOISE", "0.4")),
+            },
+        }
+        patched[dec_id]["inputs"]["samples"] = ["refine_sampler", 0]
+    create_fps = effective_fps
     mult = int(interp_multiplier or 1)
-    if mult > 1 or face_restore:
+    if mult > 1 or face_restore or anime_upscale:
         decode_id = next((nid for nid, _ in iter_nodes(patched, "VAEDecodeTiled")), None)
         create_id = next((nid for nid, _ in iter_nodes(patched, "CreateVideo")), None)
         if decode_id is None or create_id is None:
             raise PipelineError("LTX workflow missing VAEDecodeTiled/CreateVideo; cannot add post-decode nodes")
-        # frames_source walks the post-decode chain: decode -> [face restore] ->
-        # [RIFE] -> CreateVideo. Each enabled stage consumes the previous output.
+        # frames_source walks the post-decode chain: decode -> [anime upscale] ->
+        # [face restore] -> [RIFE] -> CreateVideo. Each enabled stage consumes the
+        # previous output.
         frames_source = decode_id
+        if anime_upscale:
+            # Anime detail restore: RealESRGAN AnimeVideo-v3 upscales 4x (re-drawing
+            # sharp lines / un-blurring motion-softened anime faces), then scale back
+            # to the target resolution so the sharpened detail is baked in without
+            # changing the output size (LTX_ANIME_UPSCALE_FACTOR>1 keeps it larger).
+            au_loader, au_up, au_scale = "anime_upscale_loader", "anime_upscale", "anime_downscale"
+            patched[au_loader] = {
+                "class_type": "UpscaleModelLoader",
+                "inputs": {"model_name": cfg(env, "LTX_ANIME_UPSCALE_MODEL", DEFAULT_ANIME_UPSCALE_MODEL)},
+            }
+            patched[au_up] = {
+                "class_type": "ImageUpscaleWithModel",
+                "inputs": {"upscale_model": [au_loader, 0], "image": [frames_source, 0]},
+            }
+            back = float(cfg(env, "LTX_ANIME_UPSCALE_FACTOR", "1.0"))
+            patched[au_scale] = {
+                "class_type": "ImageScale",
+                "inputs": {
+                    "image": [au_up, 0],
+                    "upscale_method": cfg(env, "LTX_ANIME_DOWNSCALE_METHOD", "bicubic"),
+                    "width": int(out_width * back),
+                    "height": int(out_height * back),
+                    "crop": "disabled",
+                },
+            }
+            frames_source = au_scale
         if face_restore:
             # Tier 2: per-frame CodeFormer face restoration (before RIFE so fewer
             # frames are processed and interpolation softens identity flicker).
@@ -315,7 +442,7 @@ def patch_ltx_workflow(
                 "inputs": {"interp_model": [loader_id, 0], "images": [frames_source, 0], "multiplier": mult},
             }
             frames_source = interp_id
-            create_fps = float(fps) * mult
+            create_fps = effective_fps * mult
         # Feed the final post-decode stage into CreateVideo.
         patched[create_id].setdefault("inputs", {})["images"] = [frames_source, 0]
     set_node_input(patched, "CreateVideo", "fps", create_fps)
@@ -475,6 +602,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     face_restore = bool_arg(cfg(env, "LTX_FACE_RESTORE", "0")) and not animation
     if animation:
         warnings.append("animation detected: CodeFormer face-restore disabled and human-blocking negatives added")
+    # Anime detail restore replaces CodeFormer for animation content: only when the
+    # RealESRGAN anime model is actually installed (auto-detected via object_info),
+    # else fall back silently to no restore.
+    anime_upscale = False
+    if animation and bool_arg(cfg(env, "LTX_ANIME_UPSCALE", "1")):
+        anime_model = cfg(env, "LTX_ANIME_UPSCALE_MODEL", DEFAULT_ANIME_UPSCALE_MODEL)
+        if anime_model in object_options(object_info, "UpscaleModelLoader", "model_name"):
+            anime_upscale = True
+        else:
+            warnings.append(f"anime upscaler '{anime_model}' not installed in ComfyUI (models/upscale_models) — skipping anime detail restore")
+
+    # Two-stage latent refine gates: each stage needs the LTXVLatentUpsampler
+    # node AND its upscaler model present; otherwise fall back with a warning.
+    def latent_refine_ready(flag_key: str, model_key: str, default_model: str, label: str) -> bool:
+        if not bool_arg(cfg(env, flag_key, "0")):
+            return False
+        if LATENT_UPSAMPLER_CLASS not in object_info:
+            warnings.append(f"{label} latent refine requested but {LATENT_UPSAMPLER_CLASS} node is absent in ComfyUI — skipping")
+            return False
+        model_name = cfg(env, model_key, default_model)
+        if model_name not in object_options(object_info, LATENT_UPSCALE_LOADER_CLASS, "model_name"):
+            warnings.append(f"{label} upscaler model '{model_name}' not installed (models/latent_upscale_models) — skipping {label} latent refine")
+            return False
+        return True
+
+    temporal_refine = latent_refine_ready("LTX_TEMPORAL_REFINE", "LTX_TEMPORAL_UPSCALER_MODEL", DEFAULT_TEMPORAL_UPSCALER_MODEL, "temporal")
+    spatial_refine = latent_refine_ready("LTX_SPATIAL_REFINE", "LTX_SPATIAL_UPSCALER_MODEL", DEFAULT_SPATIAL_UPSCALER_MODEL, "spatial")
     patched = patch_ltx_workflow(
         workflow,
         image_name,
@@ -490,6 +644,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         env,
         interp_multiplier=settings["interp"],
         face_restore=face_restore,
+        anime_upscale=anime_upscale,
+        temporal_refine=temporal_refine,
+        spatial_refine=spatial_refine,
     )
     prompt_id = queue_comfy(comfy_url, patched, timeout=http_timeout)
     history = poll_comfy(comfy_url, prompt_id, poll_seconds, timeout_seconds, empty_queue_timeout_seconds)
@@ -513,9 +670,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "steps": settings["steps"],
             "prompt_enhance": settings["prompt_enhance"],
             "interp_multiplier": settings["interp"],
-            "output_fps": settings["output_fps"],
+            "output_fps": settings["fps"] * (2 if temporal_refine else 1) * settings["interp"],
             "animation": animation,
             "face_restore": face_restore,
+            "anime_upscale": anime_upscale,
+            "temporal_refine": temporal_refine,
+            "spatial_refine": spatial_refine,
             "seed": seed,
         },
         "models": {
@@ -535,6 +695,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate an LTX-2.3 I2V video via local ComfyUI")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--input-image", dest="input_image", default="")
+    parser.add_argument("--redux-reference", dest="redux_reference", default="",
+                        help="Approved keyframe passed to the keyframe generator as a FLUX.1-Redux reference so shots keep a consistent character/style. Only used when this shot generates its own keyframe (no --input-image).")
     parser.add_argument("--mode", choices=sorted(MODE_PRESETS), default="test")
     parser.add_argument("--style", choices=["realistic", "product", "travel", "social_ad", "anime"], default="realistic")
     parser.add_argument("--keyframe-engine", choices=["auto", "flux", "animagine"], default="auto")

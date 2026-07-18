@@ -1,0 +1,95 @@
+{
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "flux1-schnell-fp8.safetensors"
+  }
+ },
+ "2": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": ["1", 1],
+   "text": "positive keyframe prompt"
+  }
+ },
+ "3": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": ["1", 1],
+   "text": "text, watermark, logo, blurry, low quality"
+  }
+ },
+ "4": {
+  "class_type": "EmptyLatentImage",
+  "inputs": {
+   "width": 1152,
+   "height": 768,
+   "batch_size": 1
+  }
+ },
+ "8": {
+  "class_type": "StyleModelLoader",
+  "inputs": {
+   "style_model_name": "flux1-redux-dev.safetensors"
+  }
+ },
+ "9": {
+  "class_type": "CLIPVisionLoader",
+  "inputs": {
+   "clip_name": "sigclip_vision_patch14_384.safetensors"
+  }
+ },
+ "10": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "redux_reference.png"
+  }
+ },
+ "11": {
+  "class_type": "CLIPVisionEncode",
+  "inputs": {
+   "clip_vision": ["9", 0],
+   "image": ["10", 0],
+   "crop": "center"
+  }
+ },
+ "12": {
+  "class_type": "StyleModelApply",
+  "inputs": {
+   "conditioning": ["2", 0],
+   "style_model": ["8", 0],
+   "clip_vision_output": ["11", 0],
+   "strength": 0.6,
+   "strength_type": "multiply"
+  }
+ },
+ "5": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": ["1", 0],
+   "positive": ["12", 0],
+   "negative": ["3", 0],
+   "latent_image": ["4", 0],
+   "seed": 12345,
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  }
+ },
+ "6": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": ["5", 0],
+   "vae": ["1", 2]
+  }
+ },
+ "7": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": ["6", 0],
+   "filename_prefix": "hermes_keyframe/sample"
+  }
+ }
+}
