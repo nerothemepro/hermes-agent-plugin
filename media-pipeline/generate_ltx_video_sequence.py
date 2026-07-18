@@ -183,7 +183,10 @@ def load_shot_prompts(args: argparse.Namespace) -> list[str]:
     total = clamp_int(args.total_duration_seconds, 6, 90)
     shot_dur = clamp_int(args.shot_duration_seconds, 1, 5)
     count = clamp_int(int(math.ceil(total / shot_dur)), 1, 20)
-    beats = ["opening action", "rising action", "mid-fight exchange", "intense clash", "climactic strike", "final standoff"]
+    # Neutral narrative beats: these are injected into EVERY auto-storyboarded
+    # sequence, so they must not impose a genre (fight beats like "intense
+    # clash" push chaotic motion into calm scenes and deform small subjects).
+    beats = ["opening moment", "rising motion", "main action", "peak of the action", "settling moment", "gentle closing"]
     prompts = []
     for i in range(count):
         beat = beats[min(i, len(beats) - 1)] if count > 1 else ""
