@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from generate_video import cfg, endpoint, http_json, load_env_file, slugify
-from generate_ltx_video import is_animation_prompt
+from generate_ltx_video import bool_arg, is_animation_prompt
 
 PROJECT_DIR = Path("/workspace/projects/media-pipeline")
 DEFAULT_ENV_FILE = "/opt/data/hermes/media-pipeline.env"
@@ -290,6 +290,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for index, prompt in enumerate(shot_prompts):
         if args.continuity == "independent":
             shot_input = args.input_image if index == 0 else None
+            # Redux-first-shot: shot 1 also GENERATES its keyframe (Redux-
+            # conditioned on the approved image) instead of starting verbatim
+            # from it, so every shot belongs to the same Redux family and shot 1
+            # stops being a lighting/framing outlier. Opt-in: the default HerVid
+            # contract is that the video starts from the exact approved image.
+            if index == 0 and args.input_image and (args.redux_first_shot or bool_arg(cfg(env, "LTX_REDUX_FIRST_SHOT", "0"))):
+                shot_input = None
         else:
             shot_input = next_input
         seed = base_seed + index
@@ -381,6 +388,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--animation", choices=["auto", "on", "off"], default="auto",
                         help="Animation/cartoon mode applied uniformly to every shot. auto (default) detects animation keywords in the overall prompt. When on, CodeFormer face-restore is skipped and human-blocking negatives are added on each shot.")
     parser.add_argument("--input-image", dest="input_image", default="")
+    parser.add_argument("--redux-first-shot", dest="redux_first_shot", action="store_true",
+                        help="Shot 1 also generates its keyframe Redux-conditioned on --input-image (instead of starting verbatim from it), so shot 1 matches shots 2+ visually. Env: LTX_REDUX_FIRST_SHOT=1.")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--fps", type=int)
