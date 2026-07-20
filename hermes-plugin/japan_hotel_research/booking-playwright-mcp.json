@@ -1,0 +1,23 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "userDataDir": "/opt/data/hermes-profiles/herresearch/booking-playwright-user-data",
+    "launchOptions": {
+      "headless": false,
+      "chromiumSandbox": false,
+      "args": [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage"
+      ]
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "locale": "en-US",
+      "timezoneId": "Asia/Tokyo"
+    }
+  }
+}

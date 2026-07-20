@@ -304,6 +304,57 @@ Operational rule for booking/search sites:
 - For Jalan.net, stable hotel-form selectors include `#jalan_form`, `#dyn_y_txt`, `#dyn_m_txt`, `#dyn_d_txt`, `#dyn_stay_txt`, `#dyn_room_num`, `#dyn_adult_num`, `#ken_list`, `#area_list`, `#research_02`; Tochigi `kenCd` is `080000`.
 - Avoid broad text locators like `text=宿・ホテル`; they match multiple elements and trigger strict-mode violations.
 
+### HerResearch Japan room availability
+
+Install the bounded room-search skill and form tools:
+
+```bash
+bash /workspace/hermes-agent-plugin/scripts/install_herresearch_hotel_availability.sh herresearch
+```
+
+The production Telegram entry point is the native plugin command:
+
+```text
+/japan-hotel-research kiểm tra phòng trống và trả về top 5 kết quả được đánh giá cao nhất:
+Khu vực: Tateyama, Chiba, Nhật Bản
+Checkin: 2026-08-16
+Checkout: 2026-08-17
+Người lớn: 2
+Trẻ em: 2 tuổi + 9 tuổi
+Số phòng: 1
+Giá: 20000y/1 đêm
+```
+
+This command bypasses the LLM and executes the deterministic workflow directly. It validates all fields before opening a browser, scans up to 30 candidates per site, applies the maximum room price per night without relaxing it, and ranks only results that contain both price and review evidence. A plain `top N` returns up to N results for each website. An explicit `top N từ cả 3 trang`, `tổng hợp`, or equivalent phrase returns one merged top N across Jalan, Airbnb, and Booking. Jalan and Airbnb ratings are normalized from 5 to 10; Booking remains on its native 10-point scale. Ties are resolved by review count descending and then price ascending. Evidence is written below `/opt/data/hermes-profiles/herresearch/reports/japan-hotel-research/`. `/japan_hotel_research` is the Telegram-menu-safe equivalent.
+
+Routing is intentionally asymmetric:
+
+- Jalan.net uses the deterministic `/workspace/jalan-room-search-tool/bin/jalan-room-search` CLI and parses current `.js-searchResultItem` cards.
+- Airbnb Japan uses the existing bounded headless Playwright MCP.
+- Booking.com uses the plugin-bundled standard headed Chromium MCP under Xvfb. Headless Booking sessions on this box drop dates and children, so the installer requires `xvfb-run` and the lane fails closed if criteria are not retained.
+- The Playwright include list adds only `browser_type`, `browser_fill_form`, `browser_select_option`, `browser_tabs`, and `browser_take_screenshot`.
+
+The workflow is search-only. It must stop on CAPTCHA/login/access denial and must never book, reserve, pay, message, create an account, upload files, change browser storage, or use private/undocumented APIs.
+
+Smoke criteria:
+
+```text
+area=Tokyo
+checkin=2026-08-15
+checkout=2026-08-16
+adults=2
+rooms=1
+max_results_per_site=3
+```
+
+After installation, restart only HerResearch and verify the MCP roster plus native command discovery:
+
+```bash
+HERMES_HOME=/opt/data/hermes-profiles/herresearch /workspace/.venvs/hermes-agent/bin/python -c "from hermes_cli.plugins import get_plugin_commands; print(sorted(get_plugin_commands()))"
+```
+
+The output must include `japan-hotel-research`. Roll back with the exact command emitted by the installer from its durable backup directory.
+
 ## Telegram Smoke Tests
 
 After restart, open each Telegram bot and send:

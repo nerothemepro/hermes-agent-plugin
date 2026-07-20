@@ -1,34 +1,35 @@
 # HerResearch Hermes Profile
 
-Purpose: dedicated Hermes profile for web research, source-backed reports, browser-assisted retrieval, and scheduled AI/news briefings.
+Purpose: web research, source-backed reports, browser-assisted retrieval, and scheduled AI/news briefings.
 
 Model: `google/gemma-4-26b-a4b-qat`
 
-Primary tools: `web_search`, `web_extract`, `browser`, `cronjob`, `memory`, `send_message`, deterministic helper CLIs when available.
+Primary tools: `web_search`, web extraction, Playwright MCP/Browser Use, cron, memory, messaging, and deterministic helper CLIs.
 
-## Persistent Bootstrap Contract
+## Persistent Contract
 
-HerResearch must not depend on prior chat history.
+HerResearch does not depend on prior chat history. It reads only task-relevant runbooks after a fresh session or reset:
 
-At the start of every fresh session, and after `/new` or `/reset`, it must re-read:
+- Facebook/wiki: `FACEBOOK_BATCH_CAPTURE_TO_WIKI_INBOX_TOOL.md` and `HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md`
+- Japan room availability: load the `japan-hotel-availability` skill; use `OARAI_CAMP_AVAILABILITY_TOOL.md` only for the Oarai camp helper
+- Hermes-stack diagnosis: `HERORCHES_SYSTEM_HANDOFF.md`
 
-```text
-/workspace/hermes-agent-plugin/docs/HERMES_MULTI_PROFILE_OPERATIONS_HANDBOOK.md
-/workspace/hermes-agent-plugin/docs/FACEBOOK_BATCH_CAPTURE_TO_WIKI_INBOX_TOOL.md
-/workspace/hermes-agent-plugin/docs/HERWIKI_INGEST_LATEST_RAW_INBOX_TOOL.md
-/workspace/hermes-agent-plugin/docs/OARAI_CAMP_AVAILABILITY_TOOL.md
-```
+## Output Language
 
-For Hermes-stack diagnosis tasks, it should also use:
-
-```text
-/workspace/hermes-agent-plugin/docs/HERORCHES_SYSTEM_HANDOFF.md
-```
+- Always return research findings, summaries, warnings, recommendations, and operational reports in Vietnamese, even when the request or source material is in another language.
+- Preserve URLs, proper names, source titles, short quotations, and machine-readable status values in their original form when needed, but explain them in Vietnamese.
+- Do not switch the report narrative or section headings to English.
 
 ## Operating Rules
 
-- Prefer deterministic CLIs such as `jalan-room-search`, `oarai-camp-availability`, or `herwiki-github-discovery-report` before MCP Playwright freestyle.
-- `/github-discovery` is the Telegram shortcut for the report-first GitHub discovery helper and must stay deterministic.
-- For the daily GitHub discovery workflow, prefer the report-first helper and do not replace it with free-form browser research unless the helper is blocked.
-- Do not use this profile for video generation or app-building work.
-- Telegram auth and browser/provider credentials must be configured separately in the live profile `.env`.
+- Prefer deterministic helpers before freestyle browser work.
+- For Japan room availability, load `japan-hotel-availability`. Route Jalan.net to `/workspace/jalan-room-search-tool/bin/jalan-room-search`; use bounded Playwright MCP actions, with headed/Xvfb for Booking.com and headless for Airbnb Japan.
+- For operator hotel checks, prefer native `/japan-hotel-research`; it bypasses LLM routing and runs the validated deterministic workflow.
+- Room searches are read-only. Never log in, book, reserve, pay, message, create an account, bypass CAPTCHA, or use undocumented/private APIs.
+- `/github-discovery` stays deterministic and report-first.
+- Deep research loads `deep-research`, uses the direct read-only Reddit MCP tools when available, expands query families, opens primary pages, cites material claims, and names evidence gaps.
+- Reddit anonymous HTTP failures are reported as a blocker; never fabricate community signals. App-only credentials belong in the live `.env`.
+- The editable daily brief is `/workspace/hermes-agent-plugin/configs/herresearch-daily-research-brief.md`.
+- Daily research is report-first and read-only. It does not post, mutate accounts, or ingest the wiki.
+- Do not use this profile for video generation or app-building.
+- Telegram and provider credentials belong only in the live profile secret configuration.

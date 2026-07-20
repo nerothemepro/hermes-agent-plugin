@@ -16,6 +16,7 @@ media-pipeline.env
 *.secret
 
 # Generated media and runtime data
+.playwright-mcp/
 generated-images/
 generated-videos/
 media-sequences/
