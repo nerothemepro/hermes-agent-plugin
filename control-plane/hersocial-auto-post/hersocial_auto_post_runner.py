@@ -386,11 +386,22 @@ class HerSocialAutoPostRunner:
             time.sleep(max(5, poll_seconds))
 
 
+def telegram_chat_id(value: str) -> str:
+    if not value:
+        raise DeliveryFailure("telegram_configuration_missing")
+    if value.startswith("telegram:"):
+        value = value.split(":", 1)[1]
+    if not value:
+        raise DeliveryFailure("telegram_configuration_missing")
+    return value
+
+
 def _send_telegram(text: str) -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_HOME_CHANNEL")
-    if not token or not chat_id:
+    raw_chat_id = os.environ.get("TELEGRAM_HOME_CHANNEL", "")
+    if not token:
         raise DeliveryFailure("telegram_configuration_missing")
+    chat_id = telegram_chat_id(raw_chat_id)
     body = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage", data=body, method="POST"
