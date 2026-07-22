@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shlex
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +28,17 @@ from hersocial_auto_post_runner import (
 
 
 READY_STATUS = "ready_for_owner_approval"
+DEFAULT_MARKETING_CHECK_TIMEOUT_SECONDS = 15
+
+
+class MarketingCheckUnavailable(AutoPostFailure):
+    pass
+
+
+class MarketingCheckBlocked(AutoPostFailure):
+    def __init__(self, result: dict) -> None:
+        super().__init__("marketing_check_blocked")
+        self.result = result
 
 
 class HerSocialAttendedRunner:
@@ -37,6 +51,8 @@ class HerSocialAttendedRunner:
         notifier,
         now=None,
         reminders_enabled: bool = True,
+        marketing_check_command: str,
+        marketing_check_timeout_seconds: int = DEFAULT_MARKETING_CHECK_TIMEOUT_SECONDS,
     ) -> None:
         self.posts_dir = posts_dir
         self.state_path = state_path
@@ -44,6 +60,8 @@ class HerSocialAttendedRunner:
         self.notifier = notifier
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.reminders_enabled = reminders_enabled
+        self.marketing_check_command = marketing_check_command
+        self.marketing_check_timeout_seconds = marketing_check_timeout_seconds
 
     def _state(self) -> dict:
         try:
@@ -115,7 +133,62 @@ class HerSocialAttendedRunner:
         return {"content_sha256": content_digest(manifest)}
 
     @staticmethod
-    def _approval_packet(manifest: dict, digest: str) -> str:
+    def _publishable_copy(manifest: dict) -> str:
+        return f"{manifest['message']}\n\n{manifest['first_comment']}"
+
+    def _marketing_check(self, manifest: dict) -> dict:
+        try:
+            command = shlex.split(self.marketing_check_command)
+        except ValueError as error:
+            raise MarketingCheckUnavailable("marketing_check_command_invalid") from error
+        if not command:
+            raise MarketingCheckUnavailable("marketing_check_command_missing")
+        try:
+            completed = subprocess.run(
+                [*command, "check", "--stdin", "--json"],
+                input=self._publishable_copy(manifest), text=True, capture_output=True,
+                timeout=self.marketing_check_timeout_seconds, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MarketingCheckUnavailable("marketing_check_unavailable") from error
+        try:
+            result = json.loads(completed.stdout)
+            errors, warnings, findings = result["errors"], result["warnings"], result["findings"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise MarketingCheckUnavailable("marketing_check_output_invalid") from error
+        if (not isinstance(errors, int) or isinstance(errors, bool) or errors < 0
+                or not isinstance(warnings, int) or isinstance(warnings, bool) or warnings < 0
+                or not isinstance(findings, list)):
+            raise MarketingCheckUnavailable("marketing_check_output_invalid")
+        if completed.returncode not in {0, 1}:
+            raise MarketingCheckUnavailable("marketing_check_unavailable")
+        if (completed.returncode == 1) != (errors > 0):
+            raise MarketingCheckUnavailable("marketing_check_exit_mismatch")
+        normalized = {"errors": errors, "warnings": warnings, "findings": findings}
+        if errors:
+            raise MarketingCheckBlocked(normalized)
+        return normalized
+
+    @staticmethod
+    def _finding_lines(findings: list, *, limit: int = 10) -> list[str]:
+        lines = []
+        for finding in findings[:limit]:
+            if not isinstance(finding, dict):
+                continue
+            rule = str(finding.get("rule") or "unknown-rule").replace("\n", " ")[:80]
+            message = str(finding.get("message") or "finding").replace("\n", " ")[:240]
+            lines.append(f"- {rule}: {message}")
+        if len(findings) > limit:
+            lines.append(f"- ... {len(findings) - limit} finding(s) omitted")
+        return lines
+
+    @classmethod
+    def _approval_packet(cls, manifest: dict, digest: str, check_result: dict) -> str:
+        if check_result["warnings"]:
+            check_section = (f"MARKETING CHECK: PASS WITH {check_result['warnings']} WARNING(S)\n"
+                             + "\n".join(cls._finding_lines(check_result["findings"])) + "\n")
+        else:
+            check_section = "MARKETING CHECK: PASS (0 errors, 0 warnings)\n"
         return (
             "HerSocial scheduled post requires owner approval\n"
             f"schedule: {manifest['scheduled_at']}\n"
@@ -126,12 +199,40 @@ class HerSocialAttendedRunner:
             f"{manifest['first_comment']}\n\n"
             f"ASSET: {manifest.get('media_path') or 'none'}\n"
             f"ASSET SHA256: {manifest.get('media_sha256') or 'none'}\n"
+            f"{check_section}"
             f"APPROVE HERSOCIAL POST {manifest['post_key']} {digest}"
         )
+
+    def _notify_check_block(self, manifest: dict, status: str, message: str, findings: list) -> None:
+        post_key = str(manifest.get("post_key") or "unknown")
+        digest = content_digest(manifest)
+        fingerprint = hashlib.sha256(json.dumps(
+            {"status": status, "message": message, "findings": findings, "digest": digest},
+            ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        record = self._state().get("posts", {}).get(post_key, {})
+        if record.get("check_block_fingerprint") != fingerprint:
+            self.notifier("\n".join([message, *self._finding_lines(findings)]))
+        self._record(post_key, status=status, content_sha256=digest,
+                     check_block_fingerprint=fingerprint)
+
+    def _gate_or_report(self, manifest: dict) -> dict | None:
+        post_key = str(manifest.get("post_key") or "unknown")
+        try:
+            return self._marketing_check(manifest)
+        except MarketingCheckBlocked as error:
+            self._notify_check_block(manifest, "check_blocked",
+                f"post {post_key} bị check chặn: {error.result['errors']} lỗi",
+                error.result["findings"])
+            return None
+        except MarketingCheckUnavailable:
+            self._notify_check_block(manifest, "check_unavailable",
+                f"post {post_key} bị chặn: check unavailable", [])
+            return None
 
     def preview(self, post_key: str) -> dict:
         manifest = self._manifest(post_key)
         digest = self._validate_ready(manifest)["content_sha256"]
+        check_result = self._marketing_check(manifest)
         return {
             "status": "ready_for_owner_approval",
             "post_key": post_key,
@@ -141,12 +242,14 @@ class HerSocialAttendedRunner:
             "media_path": manifest.get("media_path"),
             "media_sha256": manifest.get("media_sha256"),
             "content_sha256": digest,
+            "marketing_check": check_result,
             "approval_command": f"APPROVE HERSOCIAL POST {post_key} {digest}",
         }
 
     def record_approval(self, post_key: str, digest: str) -> dict:
         manifest = self._manifest(post_key)
         expected = self._validate_ready(manifest)["content_sha256"]
+        self._marketing_check(manifest)
         if digest != expected:
             raise AutoPostFailure("approval_digest_mismatch")
         record = self._state().get("posts", {}).get(post_key, {})
@@ -187,6 +290,8 @@ class HerSocialAttendedRunner:
                     return {"status": "blocked", "post_key": post_key, "reason": "approval_digest_mismatch"}
                 if _parse_schedule(manifest["scheduled_at"]) > self.now().astimezone(timezone.utc):
                     return {"status": "approved_waiting_for_schedule", "post_key": post_key}
+                if self._gate_or_report(manifest) is None:
+                    return {"status": self._state()["posts"][post_key]["status"], "post_key": post_key}
                 return self._publish_approved(manifest, validated["content_sha256"])
 
         if not self.reminders_enabled:
@@ -200,7 +305,10 @@ class HerSocialAttendedRunner:
             validated = self._validate_ready(manifest)
             if _parse_schedule(manifest["scheduled_at"]) > now:
                 continue
-            packet = self._approval_packet(manifest, validated["content_sha256"])
+            check_result = self._gate_or_report(manifest)
+            if check_result is None:
+                return {"status": self._state()["posts"][post_key]["status"], "post_key": post_key}
+            packet = self._approval_packet(manifest, validated["content_sha256"], check_result)
             self.notifier(packet)
             self._record(post_key, status="approval_requested", content_sha256=validated["content_sha256"])
             return {"status": "approval_requested", "post_key": post_key}
@@ -234,6 +342,9 @@ def main() -> int:
         ),
         notifier=_send_telegram,
         reminders_enabled=os.environ.get("HERSOCIAL_ATTENDED_REMINDERS_ENABLED", "true").lower() == "true",
+        marketing_check_command=os.environ.get("HERSOCIAL_MARKETING_CHECK_COMMAND", ""),
+        marketing_check_timeout_seconds=int(os.environ.get(
+            "HERSOCIAL_MARKETING_CHECK_TIMEOUT_SECONDS", str(DEFAULT_MARKETING_CHECK_TIMEOUT_SECONDS))),
     )
     try:
         if args.preview:
