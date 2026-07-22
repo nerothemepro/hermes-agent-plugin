@@ -185,6 +185,8 @@ class HerSocialAttendedRunner:
                 if record.get("content_sha256") != validated["content_sha256"]:
                     self._record(post_key, status="blocked", reason="approval_digest_mismatch")
                     return {"status": "blocked", "post_key": post_key, "reason": "approval_digest_mismatch"}
+                if _parse_schedule(manifest["scheduled_at"]) > self.now().astimezone(timezone.utc):
+                    return {"status": "approved_waiting_for_schedule", "post_key": post_key}
                 return self._publish_approved(manifest, validated["content_sha256"])
 
         if not self.reminders_enabled:
