@@ -1,0 +1,13 @@
+{
+  "schema_version": "hersocial.facebook-post.v1",
+  "post_key": "sdtk-hero-pack-post-2",
+  "status": "ready_for_owner_approval",
+  "scheduled_at": "2026-07-26T09:00:00+07:00",
+  "max_lateness_minutes": 1440,
+  "message": "**Re-skin a WebGL shader by changing one CSS variable. 🎨**\n\nA trick from our free hero pack: the effects don't hard-code colours. Each hero reads its palette from CSS custom properties (`--accent`, `--glow`, …) at runtime — and a `MutationObserver` re-reads them the instant the theme or palette changes.\n\nSo the aurora shader, the liquid metal, even the three.js scenes all follow your brand from ONE token edit. Six ready palettes ship in every file (ember · aurora · nebula · rose · jade · azure — pick with the dots in the header), and adding your own is one CSS line.\n\nDesign tokens aren't just for buttons. Make your effects obey them too.\n\nTry it live (click the colour dots): https://sdtk.dev/heroes?utm_source=facebook&utm_medium=social&utm_campaign=hero-pack-launch\n\n#css #designsystems #webgl #frontend #designtokens",
+  "first_comment": "TL;DR 🇻🇳: Hero pack free của tụi tôi không hard-code màu trong shader — WebGL/three.js đọc màu từ CSS variable và tự đổi ngay khi bạn đổi palette/theme (MutationObserver). Đổi đúng 1 biến `--accent` là cả hiệu ứng đổi theo brand của bạn. Vào link, bấm mấy chấm màu trên header để thử live.",
+  "media_path": "/workspace/sdtk-internal/governance/marketing/assets/post2-palette-grid.png",
+  "media_kind": "image",
+  "media_sha256": "8ec7b36f908f653e29f74c5da9fc662cdf79ffe88d0b641a9158238e2b6dc895",
+  "source_document": "governance/marketing/SDTK_FB_POSTS_HERO_PACK_LAUNCH_R1_20260716.md"
+}
