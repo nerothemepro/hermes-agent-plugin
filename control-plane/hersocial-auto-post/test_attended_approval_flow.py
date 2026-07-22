@@ -56,6 +56,7 @@ class AttendedApprovalFlowTest(unittest.TestCase):
             notifier=(deliveries if deliveries is not None else []).append,
             now=self.now,
             reminders_enabled=reminders,
+            marketing_check_command=f"python3 {Path(__file__).with_name('marketing_checker_fixture.py')}",
         )
 
     def test_due_manifest_sends_exact_approval_packet_once_without_facebook(self):

@@ -7,7 +7,9 @@ Deterministic Facebook Page scheduling for owner-approved SDTK posts. The runner
 - Secrets are loaded only from mounted profile/marketing env files and passed through `env -i`.
 - `mkt-digest.env` must remain mode `0600`.
 - A manifest must be `approved`, name `owner` as approver, and contain the exact SHA-256 of its canonical content.
-- Missing media, unsupported video, stale schedule, approval drift, invalid timezone, or Graph health failure blocks publication.
+- Missing media, unsupported video, stale schedule, approval drift, invalid timezone, Graph health failure, or an unavailable/failed marketing check blocks publication.
+- Before an approval packet is sent, the runner checks the exact page copy plus first comment through `sdtk-marketing check --stdin --json`. Errors block; warnings are included in the packet.
+- The check invocation is configured only through `HERSOCIAL_MARKETING_CHECK_COMMAND`. The interim value is `node /workspace/sdtk-internal/products/sdtk-marketing/distribution/sdtk-marketing-kit/bin/sdtk-marketing.js`; change only this value to `sdtk-marketing` after the npm package is published.
 - The runner does not retry Facebook publication automatically.
 - Exact existing Page content is adopted instead of duplicated.
 - Personal-profile sharing and video publishing are out of scope.
@@ -24,13 +26,14 @@ HERSOCIAL_AUTO_POST_ENABLED=false \
   --preview <post-key>
 ```
 
-4. Owner approves the exact command returned by preview:
+4. Confirm preview contains `marketing_check.errors: 0`; review any warnings surfaced beside the approval command.
+5. Owner approves the exact command returned by preview:
 
 ```text
 APPROVE HERSOCIAL POST <post-key> <content_sha256>
 ```
 
-5. Set the digest in `approval.approved_content_sha256`, verify preview again, then enable the supervisor program only for the approved schedule.
+6. Set the digest in `approval.approved_content_sha256`, verify preview again, then enable the supervisor program only for the approved schedule.
 
 ## Enable And Roll Back
 

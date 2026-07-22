@@ -52,6 +52,7 @@ class AttendedEarlyApprovalTest(unittest.TestCase):
                 facebook=facebook,
                 notifier=lambda _: None,
                 now=lambda: datetime(2026, 7, 24, 1, 0, tzinfo=timezone.utc),
+                marketing_check_command=f"python3 {Path(__file__).with_name('marketing_checker_fixture.py')}",
             )
             runner.record_approval("post-five", module.content_digest(manifest))
             result = runner.run_attended_once()
