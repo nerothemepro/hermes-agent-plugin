@@ -46,6 +46,7 @@ def _canonical_content(manifest: dict) -> dict:
         "message": manifest.get("message"),
         "first_comment": manifest.get("first_comment"),
         "media_path": manifest.get("media_path"),
+        "media_sha256": manifest.get("media_sha256"),
         "media_kind": manifest.get("media_kind"),
         "source_document": manifest.get("source_document"),
     }

@@ -26,6 +26,8 @@ class RuntimeContractTest(unittest.TestCase):
         self.assertIn("autostart=true", text)
         self.assertIn("autorestart=true", text)
         self.assertIn('HERSOCIAL_AUTO_POST_ENABLED="false"', text)
+        self.assertIn('HERSOCIAL_ATTENDED_REMINDERS_ENABLED="true"', text)
+        self.assertIn('hersocial_attended_runner.py', WRAPPER.read_text(encoding="utf-8"))
         self.assertIn("/opt/data/hermes/control-plane/hersocial-auto-post/supervisord.log", text)
 
     def test_main_supervisor_includes_auto_post_program(self):

@@ -41,11 +41,12 @@ env_args=(
   "FACEBOOK_PAGE_ACCESS_TOKEN=$FB_PAGE_TOKEN"
   "FACEBOOK_PAGE_ID=$FB_PAGE_ID"
   "HERSOCIAL_AUTO_POST_ENABLED=${HERSOCIAL_AUTO_POST_ENABLED:-false}"
+  "HERSOCIAL_ATTENDED_REMINDERS_ENABLED=${HERSOCIAL_ATTENDED_REMINDERS_ENABLED:-true}"
 )
 
 umask 077
 exec env -i "${env_args[@]}" \
-  /usr/bin/python3 /workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/hersocial_auto_post_runner.py \
+  /usr/bin/python3 /workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/hersocial_attended_runner.py \
     --posts-dir "${HERSOCIAL_AUTO_POST_POSTS_DIR:-/workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/posts}" \
     --state-path "${HERSOCIAL_AUTO_POST_STATE_PATH:-/opt/data/hermes/control-plane/hersocial-auto-post/state.json}" \
     --poll-seconds "${HERSOCIAL_AUTO_POST_POLL_SECONDS:-30}" \
