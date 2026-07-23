@@ -118,6 +118,18 @@ class EvidenceGateTests(unittest.TestCase):
         self.assertEqual("2026-07-19T00:00:00+00:00", records[0]["publication_date"])
         self.assertEqual("content_marker", records[0]["date_type"])
 
+    def test_rejects_unresolved_google_news_wrapper_as_evidence_url(self):
+        self.assertFalse(
+            self.collector.is_usable_evidence_url(
+                "https://news.google.com/rss/articles/example?oc=5"
+            )
+        )
+        self.assertTrue(
+            self.collector.is_usable_evidence_url(
+                "https://publisher.example/fresh-signal"
+            )
+        )
+
     def test_parses_google_news_rss_as_timestamped_candidates(self):
         payload = b"""<?xml version='1.0'?><rss><channel><item>
         <title>Fresh creator signal</title>

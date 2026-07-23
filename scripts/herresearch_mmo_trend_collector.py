@@ -178,14 +178,24 @@ def resolve_google_news_url(url: str) -> str:
         return response.geturl()
 
 
+def is_usable_evidence_url(url: str) -> bool:
+    hostname = (urlparse(url).hostname or "").lower()
+    return bool(hostname) and hostname not in {"news.google.com", "www.news.google.com"}
+
+
 def fetch_google_news_candidates(profile: dict[str, str]) -> list[dict[str, Any]]:
     query = urlencode({"q": profile["query"], "hl": "en-US", "gl": "US", "ceid": "US:en"})
     request = Request(f"{GOOGLE_NEWS_BASE}?{query}", headers={"User-Agent": "HerResearch-MMO-Radar/2.0"})
     with urlopen(request, timeout=20) as response:
         candidates = parse_google_news_rss(response.read(), profile["id"])
+    resolved_candidates = []
     for candidate in candidates:
-        candidate["url"] = resolve_google_news_url(candidate["url"])
-    return candidates[:MAX_RESULTS_PER_QUERY]
+        resolved_url = resolve_google_news_url(candidate["url"])
+        if not is_usable_evidence_url(resolved_url):
+            continue
+        candidate["url"] = resolved_url
+        resolved_candidates.append(candidate)
+    return resolved_candidates[:MAX_RESULTS_PER_QUERY]
 
 
 def build_evidence_records(candidates: list[dict[str, Any]], extract_payload: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
