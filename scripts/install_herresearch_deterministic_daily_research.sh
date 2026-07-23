@@ -44,6 +44,6 @@ else
 fi
 
 printf 'BACKUP_DIR=%s\n' "$backup_dir"
-printf 'ROLLBACK=cp %q %q && rm -f %q && HERMES_HOME=%q %q gateway restart\n' \
-  "$backup_dir/jobs.before.json" "$JOBS_FILE" "$COLLECTOR_DEST" "$PROFILE_HOME" "$HERMES_BIN"
+printf 'ROLLBACK=cp %q %q && cp %q %q && HERMES_HOME=%q %q gateway restart\n' \
+  "$backup_dir/jobs.before.json" "$JOBS_FILE" "$backup_dir/$COLLECTOR_NAME.before" "$COLLECTOR_DEST" "$PROFILE_HOME" "$HERMES_BIN"
 HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" cron list
