@@ -23,6 +23,8 @@ set -a
 set +a
 set -u
 
+marketing_check_command="${HERSOCIAL_MARKETING_CHECK_COMMAND:-sdtk-marketing}"
+
 for required_name in TELEGRAM_BOT_TOKEN TELEGRAM_HOME_CHANNEL FB_PAGE_TOKEN FB_PAGE_ID; do
   if [[ -z "${!required_name:-}" ]]; then
     echo "hersocial auto-post bootstrap failed: required environment unavailable" >&2
@@ -42,7 +44,7 @@ env_args=(
   "FACEBOOK_PAGE_ID=$FB_PAGE_ID"
   "HERSOCIAL_AUTO_POST_ENABLED=${HERSOCIAL_AUTO_POST_ENABLED:-false}"
   "HERSOCIAL_ATTENDED_REMINDERS_ENABLED=${HERSOCIAL_ATTENDED_REMINDERS_ENABLED:-true}"
-  "HERSOCIAL_MARKETING_CHECK_COMMAND=${HERSOCIAL_MARKETING_CHECK_COMMAND:-}"
+  "HERSOCIAL_MARKETING_CHECK_COMMAND=$marketing_check_command"
   "HERSOCIAL_MARKETING_CHECK_TIMEOUT_SECONDS=${HERSOCIAL_MARKETING_CHECK_TIMEOUT_SECONDS:-15}"
 )
 

@@ -18,6 +18,8 @@ class RuntimeContractTest(unittest.TestCase):
         self.assertIn('"FACEBOOK_PAGE_ACCESS_TOKEN=$FB_PAGE_TOKEN"', text)
         self.assertIn('"FACEBOOK_PAGE_ID=$FB_PAGE_ID"', text)
         self.assertIn("exec env -i", text)
+        self.assertIn('marketing_check_command="${HERSOCIAL_MARKETING_CHECK_COMMAND:-sdtk-marketing}"', text)
+        self.assertIn('"HERSOCIAL_MARKETING_CHECK_COMMAND=$marketing_check_command"', text)
         self.assertNotIn("echo $FB_PAGE_TOKEN", text)
         self.assertNotIn("set -x", text)
 
