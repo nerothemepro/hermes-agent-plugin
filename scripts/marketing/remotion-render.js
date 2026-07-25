@@ -19,9 +19,10 @@ const capture = value('--capture');
 const input = value('--input');
 const out = value('--out');
 const project = process.env.SDTK_MARKETING_REMOTION_PROJECT || '';
-const composition = process.env.SDTK_MARKETING_REMOTION_COMPOSITION || 'SdtkTutorial';
+const configuredComposition = process.env.SDTK_MARKETING_REMOTION_COMPOSITION || 'IntroBrand';
+const composition = capture ? 'SdtkTutorial' : configuredComposition;
 
-if (!capture || !fs.statSync(capture, { throwIfNoEntry: false })?.isFile()) fail('a real --capture file is required');
+if (capture && !fs.statSync(capture, { throwIfNoEntry: false })?.isFile()) fail('--capture must point to a real file when supplied');
 if (!out) fail('--out is required');
 if (!project || !fs.statSync(project, { throwIfNoEntry: false })?.isDirectory()) {
   fail('SDTK_MARKETING_REMOTION_PROJECT is missing or not a directory');
@@ -36,13 +37,17 @@ if (!fs.statSync(entryPoint, { throwIfNoEntry: false })?.isFile()) {
   fail('Remotion project entrypoint src/index.jsx is missing');
 }
 
-const captureName = path.basename(capture);
-const publicCapture = path.join(project, 'public', 'captures', captureName);
-fs.mkdirSync(path.dirname(publicCapture), { recursive: true });
-fs.copyFileSync(capture, publicCapture);
+let captureProp = '';
+if (capture) {
+  const captureName = path.basename(capture);
+  const publicCapture = path.join(project, 'public', 'captures', captureName);
+  fs.mkdirSync(path.dirname(publicCapture), { recursive: true });
+  fs.copyFileSync(capture, publicCapture);
+  captureProp = `captures/${captureName}`;
+}
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
-const props = JSON.stringify({ capture: `captures/${captureName}`, input });
+const props = JSON.stringify({ capture: captureProp, input });
 const result = spawnSync(
   remotion,
   ['render', entryPoint, composition, out, '--props', props],
