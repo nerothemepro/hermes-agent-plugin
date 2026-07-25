@@ -20,6 +20,14 @@ class RuntimeContractTest(unittest.TestCase):
         self.assertIn("exec env -i", text)
         self.assertIn('marketing_check_command="${HERSOCIAL_MARKETING_CHECK_COMMAND:-sdtk-marketing}"', text)
         self.assertIn('"HERSOCIAL_MARKETING_CHECK_COMMAND=$marketing_check_command"', text)
+        for delegate_name in (
+            "SDTK_MARKETING_ASSET_HOME",
+            "SDTK_MARKETING_VIDEO_CMD_REMOTION",
+            "SDTK_MARKETING_VIDEO_CMD_COMFYUI",
+            "SDTK_MARKETING_PUBLISH_CMD_YOUTUBE",
+            "SDTK_MARKETING_PUBLISH_CMD_FACEBOOK_VIDEO",
+        ):
+            self.assertIn(delegate_name, text)
         self.assertNotIn("echo $FB_PAGE_TOKEN", text)
         self.assertNotIn("set -x", text)
 

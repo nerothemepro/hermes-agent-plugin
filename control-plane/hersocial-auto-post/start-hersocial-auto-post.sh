@@ -48,6 +48,25 @@ env_args=(
   "HERSOCIAL_MARKETING_CHECK_TIMEOUT_SECONDS=${HERSOCIAL_MARKETING_CHECK_TIMEOUT_SECONDS:-15}"
 )
 
+
+# Keep video/publish delegates in the same clean environment as the attended runner.
+for optional_name in \
+  SDTK_MARKETING_HOME \
+  SDTK_MARKETING_ASSET_HOME \
+  SDTK_MARKETING_VIDEO_CMD_REMOTION \
+  SDTK_MARKETING_VIDEO_CMD_COMFYUI \
+  SDTK_MARKETING_PUBLISH_CMD_YOUTUBE \
+  SDTK_MARKETING_PUBLISH_CMD_FACEBOOK_VIDEO \
+  SDTK_MARKETING_REMOTION_PROJECT \
+  SDTK_MARKETING_REMOTION_COMPOSITION \
+  YOUTUBE_CLIENT_ID \
+  YOUTUBE_CLIENT_SECRET \
+  YOUTUBE_REFRESH_TOKEN; do
+  if [[ -n "${!optional_name:-}" ]]; then
+    env_args+=("${optional_name}=${!optional_name}")
+  fi
+done
+
 umask 077
 exec env -i "${env_args[@]}" \
   /usr/bin/python3 /workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/hersocial_attended_runner.py \
