@@ -3,6 +3,11 @@
 
 const fs = require('fs');
 
+function normalizePermalink(permalink, videoId) {
+  const value = permalink || `https://www.facebook.com/${videoId}`;
+  return value.startsWith('http') ? value : `https://www.facebook.com${value}`;
+}
+
 function value(flag) {
   const index = process.argv.indexOf(flag);
   return index === -1 ? '' : process.argv[index + 1] || '';
@@ -40,7 +45,9 @@ async function main() {
   if (!videoId) fail(1, 'facebook_upload_missing_video_id');
   const detail = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(videoId)}?fields=permalink_url&access_token=${encodeURIComponent(token)}`);
   const metadata = await json(detail, 'facebook_permalink');
-  process.stdout.write(`${metadata.permalink_url || `https://www.facebook.com/${videoId}`}\n`);
+  process.stdout.write(`${normalizePermalink(metadata.permalink_url, videoId)}\n`);
 }
 
-main().catch(() => fail(1, 'unexpected_failure'));
+if (require.main === module) main().catch(() => fail(1, 'unexpected_failure'));
+
+module.exports = { normalizePermalink };
