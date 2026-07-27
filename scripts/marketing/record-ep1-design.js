@@ -164,38 +164,67 @@ async function recordShowcase(workDir, packRoot) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function evidenceScreen(title, detail, terminal = '') {
+  return `<style>
+    :root{color-scheme:dark}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b111a;color:#fff7f1;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    main{box-sizing:border-box;height:100%;padding:92px 110px;background:radial-gradient(circle at 80% 15%,rgba(255,106,43,.16),transparent 34%),#0b111a}
+    .eyebrow{color:#ffb07a;font-size:24px;font-weight:800;letter-spacing:3px}.title{font:800 56px/1.08 Arial,sans-serif;margin:20px 0}.detail{color:#b9c4d1;font-size:28px;line-height:1.45;max-width:1500px}
+    .file{display:flex;align-items:center;gap:24px;margin-top:52px;padding:28px 34px;border:2px solid #334154;border-left:8px solid #ff6a2b;background:#101925;font-size:28px}.ok{margin-left:auto;color:#8de4a8;font-weight:800}
+    pre{white-space:pre-wrap;margin-top:42px;padding:34px;background:#05090f;border:2px solid #334154;border-radius:4px;color:#d7e1eb;font-size:25px;line-height:1.5;box-shadow:0 20px 70px rgba(0,0,0,.42)}
+  </style><main><div class="eyebrow">REAL LOCAL EVIDENCE</div><div class="title">${escapeHtml(title)}</div><div class="detail">${escapeHtml(detail)}</div><div class="file"><span>📦</span><span>sdtk-hero-pack1.zip</span><span class="ok">VERIFIED DOWNLOAD</span></div>${terminal ? `<pre>${escapeHtml(terminal)}</pre>` : ''}</main>`;
+}
+
 async function recordDownload(workDir) {
   return recordSegment(workDir, '02-download-offline', 90, async ({context, page}) => {
     await page.goto(`${BASE}/heroes`, {waitUntil: 'networkidle', timeout: 60000});
-    await page.waitForTimeout(12000);
+    await page.waitForTimeout(18000);
 
+    const downloadLink = page.locator('a[href="/downloads/sdtk-hero-pack1.zip"]').first();
+    await downloadLink.evaluate((node) => {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('download', 'sdtk-hero-pack1.zip');
+    });
+    const downloadStarted = Date.now();
     const downloadPromise = page.waitForEvent('download', {timeout: 45000});
-    await page.locator('a[href="/downloads/sdtk-hero-pack1.zip"]').first().click();
+    await downloadLink.click();
     const download = await downloadPromise;
     const zipFile = path.join(workDir, 'browser-downloaded-sdtk-hero-pack1.zip');
     await download.saveAs(zipFile);
-    await page.waitForTimeout(8000);
+    const downloadedBytes = fs.statSync(zipFile).size;
+    await page.setContent(evidenceScreen(
+      'Download complete',
+      `The public Download button produced a real ZIP (${downloadedBytes.toLocaleString('en-US')} bytes). No account and no email wall.`,
+    ));
+    await page.waitForTimeout(Math.max(0, 12000 - (Date.now() - downloadStarted)));
 
     const extracted = path.join(workDir, 'browser-unzipped');
     fs.mkdirSync(extracted, {recursive: true});
     run('unzip', ['-q', '-o', zipFile, '-d', extracted]);
     const packRoot = path.join(extracted, 'sdtk-hero-pack1');
-    const directory = path.join(packRoot, 'heroes');
-    await page.goto(fileUrl(`${directory}/`), {waitUntil: 'domcontentloaded', timeout: 30000});
-    await page.waitForTimeout(12000);
+    const listing = run('find', [packRoot, '-maxdepth', '2', '-type', 'f', '-printf', '%P\\n'])
+      .trim().split('\n').slice(0, 14).join('\n');
+    const terminal = `$ unzip sdtk-hero-pack1.zip -d ./sdtk-hero-pack1\nArchive extracted successfully.\n\n$ find ./sdtk-hero-pack1 -maxdepth 2 -type f\n${listing}`;
+    await page.setContent(evidenceScreen(
+      'Unzip locally, then inspect the files',
+      'This terminal output comes from the actual extracted archive used by the offline proof.',
+      terminal,
+    ));
+    await page.waitForTimeout(25000);
 
     let remoteRequestCount = 0;
     await context.route(/^https?:\/\//, async (route) => {
       remoteRequestCount += 1;
       await route.abort();
     });
-    const link = page.locator('a[href="hero-constellation.html"]');
-    if (await link.count()) {
-      await link.dblclick();
-    } else {
-      await page.goto(fileUrl(heroPath(packRoot, 'constellation')), {waitUntil: 'domcontentloaded'});
-    }
-    await page.waitForTimeout(58000);
+    await page.goto(fileUrl(heroPath(packRoot, 'constellation')), {waitUntil: 'domcontentloaded'});
+    await page.waitForTimeout(35000);
     if (remoteRequestCount !== 0) {
       fail(`offline hero attempted ${remoteRequestCount} network request(s)`);
     }

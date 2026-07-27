@@ -11,6 +11,23 @@ assert.ok(contract.longForm.showcaseCutSeconds >= 3 && contract.longForm.showcas
 assert.ok(contract.motion.maxStaticSeconds <= 5);
 assert.deepStrictEqual(contract.shortForm.size, {width: 1440, height: 2560});
 assert.strictEqual(contract.shortForm.durationSeconds, 55);
+assert.strictEqual(contract.shortForm.actionSeconds + contract.shortForm.ctaSeconds, 55);
+assert.strictEqual(contract.shortForm.ctaSeconds, 3);
+assert.ok(contract.shortForm.minCaptionFontSize >= 72);
+assert.ok(contract.shortForm.minCtaFontSize >= 72);
+assert.deepStrictEqual(
+  contract.downloadChapter.stages.map(({id, start, end}) => [id, start, end]),
+  [
+    ['landing', 0, 18],
+    ['download', 18, 30],
+    ['unzip', 30, 55],
+    ['offline', 55, 90],
+  ],
+);
+assert.strictEqual(
+  contract.downloadChapter.stages.reduce((total, stage) => total + stage.end - stage.start, 0),
+  contract.downloadChapter.durationSeconds,
+);
 
 assert.deepStrictEqual(
   contract.longForm.shots.map(({id, start, end}) => [id, start, end]),

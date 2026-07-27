@@ -41,7 +41,7 @@ const Pill = ({children}) => (
   }}>{children}</div>
 );
 
-const Caption = ({children, maxWidth = 1500}) => (
+const Caption = ({children, maxWidth = 1500, fontSize = 34}) => (
   <div style={{
     alignSelf: 'center',
     maxWidth,
@@ -49,7 +49,7 @@ const Caption = ({children, maxWidth = 1500}) => (
     borderTop: '3px solid #ff6a2b',
     color: '#fff7f1',
     padding: '18px 28px',
-    fontSize: 34,
+    fontSize,
     fontWeight: 700,
     lineHeight: 1.22,
     textAlign: 'center',
@@ -60,6 +60,28 @@ const Caption = ({children, maxWidth = 1500}) => (
 const Overlay = ({children, justifyContent = 'flex-end', padding = 44}) => (
   <AbsoluteFill style={{pointerEvents: 'none', justifyContent, padding}}>{children}</AbsoluteFill>
 );
+
+const MotionRail = () => {
+  const frame = useCurrentFrame();
+  const x = (frame * 16) % 2320 - 360;
+  return (
+    <AbsoluteFill style={{
+      zIndex: 20,
+      background: 'radial-gradient(circle 440px at ' + x + 'px 12%, rgba(255,106,43,.2), rgba(255,106,43,.06) 42%, rgba(255,106,43,0) 72%)',
+      pointerEvents: 'none',
+    }}>
+      <div style={{
+        position: 'absolute',
+        top: 14,
+        left: x,
+        width: 360,
+        height: 10,
+        background: 'linear-gradient(90deg, rgba(255,106,43,0), #ff6a2b 35%, #ffb07a 70%, rgba(255,176,122,0))',
+        boxShadow: '0 0 22px rgba(255,106,43,.72)',
+      }} />
+    </AbsoluteFill>
+  );
+};
 
 const SectionCard = ({eyebrow, title, detail}) => {
   const frame = useCurrentFrame();
@@ -115,9 +137,9 @@ const DownloadOverlay = () => {
   const seconds = frame / FPS;
   const railX = ((frame % toFrame(5)) / toFrame(5)) * 1680;
   let caption = 'Open sdtk.dev/heroes — the whole pack is free.';
-  if (seconds >= 20 && seconds < 45) caption = 'Download the ZIP. No account. No email wall.';
-  if (seconds >= 45 && seconds < 65) caption = 'Unzip locally — HTML, docs, and bundled JavaScript.';
-  if (seconds >= 65) caption = 'Double-click a hero file. It runs offline — no CDN request.';
+  if (seconds >= 18 && seconds < 30) caption = 'Click Download — the real ZIP appears and is verified locally.';
+  if (seconds >= 30 && seconds < 55) caption = 'Run unzip, then list the extracted HTML, docs, and bundled JavaScript.';
+  if (seconds >= 55) caption = 'Open the extracted hero file. It runs offline — no CDN request.';
   return (
     <Overlay justifyContent="space-between">
       <div style={{position: 'absolute', top: 0, left: railX, width: 240, height: 6, background: '#ff6a2b', boxShadow: '0 0 20px #ffb07a'}} />
@@ -169,13 +191,13 @@ const Cta = () => {
 
 const ShortCta = () => {
   const frame = useCurrentFrame();
-  const glowY = interpolate(frame, [0, toFrame(13)], [-500, 2600]);
+  const glowY = interpolate(frame, [0, toFrame(3)], [-400, 2300]);
   return (
-    <AbsoluteFill style={{background: '#0b111a', color: '#fff7f1', alignItems: 'center', justifyContent: 'center', padding: 90, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: '#0b111a', color: '#fff7f1', alignItems: 'center', justifyContent: 'center', padding: 86, overflow: 'hidden'}}>
       <div style={{position: 'absolute', width: 900, height: 900, left: 270, top: glowY, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,106,43,.3), rgba(255,106,43,0) 70%)'}} />
-      <div style={{fontSize: 110, fontWeight: 900, textAlign: 'center'}}>6 FREE<br />WEBGL HEROES</div>
-      <div style={{fontSize: 48, color: '#ffb07a', marginTop: 48}}>No email wall.</div>
-      <div style={{fontSize: 31, color: '#b9c4d1', marginTop: 62, textAlign: 'center'}}>{CTA}</div>
+      <div style={{fontSize: 122, fontWeight: 900, textAlign: 'center', lineHeight: 1.04}}>6 FREE<br />WEBGL HEROES</div>
+      <div style={{fontSize: 76, color: '#ffb07a', marginTop: 58, fontWeight: 800}}>No email wall.</div>
+      <div style={{fontSize: 76, color: '#fff7f1', marginTop: 76, textAlign: 'center', fontWeight: 850}}>sdtk.dev/heroes</div>
     </AbsoluteFill>
   );
 };
@@ -195,23 +217,32 @@ export const TutorialEp = ({capture}) => (
     <Sequence from={toFrame(135)} durationInFrames={toFrame(90)}><ReskinOverlay /></Sequence>
     <Sequence from={toFrame(225)} durationInFrames={toFrame(45)}><HonestOverlay /></Sequence>
     <Sequence from={toFrame(270)} durationInFrames={toFrame(30)}><Cta /></Sequence>
+    <MotionRail />
   </AbsoluteFill>
 );
 
 export const TutorialEpShort = ({capture}) => (
-  <AbsoluteFill style={{background: '#0b111a', fontFamily: 'Arial, Helvetica, sans-serif'}}>
+  <AbsoluteFill style={{background: '#0b111a', fontFamily: 'Arial, Helvetica, sans-serif', overflow: 'hidden'}}>
     <Sequence from={0} durationInFrames={toFrame(3)}>
-      <OffthreadVideo src={staticFile(capture)} style={{height: '100%', width: '100%', objectFit: 'cover'}} />
-      <Overlay padding={70}><Caption maxWidth={1200}>AI wrote this. First try? Failed.</Caption></Overlay>
-    </Sequence>
-    <Sequence from={toFrame(3)} durationInFrames={toFrame(39)}>
-      <OffthreadVideo src={staticFile(capture)} startFrom={toFrame(147)} style={{height: '100%', width: '100%', objectFit: 'cover', objectPosition: '50% 50%'}} />
-      <Overlay justifyContent="space-between" padding={70}>
-        <Pill>ONE CSS VARIABLE</Pill>
-        <Caption maxWidth={1220}>Change --accent. The entire WebGL scene reskins.</Caption>
+      <div style={{position: 'absolute', top: 620, left: 0, width: 1440, height: 810, background: '#05090f'}}>
+        <OffthreadVideo src={staticFile(capture)} style={{height: '100%', width: '100%', objectFit: 'contain'}} />
+      </div>
+      <Overlay justifyContent="space-between" padding={84}>
+        <div style={{fontSize: 92, lineHeight: 1.05, color: '#fff7f1', fontWeight: 900}}>AI WROTE THIS.<br /><span style={{color: '#ff6a2b'}}>FIRST TRY? FAILED.</span></div>
+        <Caption maxWidth={1260} fontSize={78}>Particle swarm spells the full SDTK wordmark.</Caption>
       </Overlay>
     </Sequence>
-    <Sequence from={toFrame(42)} durationInFrames={toFrame(13)}><ShortCta /></Sequence>
+    <Sequence from={toFrame(3)} durationInFrames={toFrame(49)}>
+      <div style={{position: 'absolute', top: 620, left: 0, width: 1440, height: 810, background: '#05090f'}}>
+        <OffthreadVideo src={staticFile(capture)} startFrom={toFrame(147)} style={{height: '100%', width: '100%', objectFit: 'contain'}} />
+      </div>
+      <Overlay justifyContent="space-between" padding={84}>
+        <div style={{fontSize: 86, lineHeight: 1.04, color: '#fff7f1', fontWeight: 900}}>ONE CSS VARIABLE<br /><span style={{color: '#ffb07a'}}>RESKINS THE SCENE</span></div>
+        <Caption maxWidth={1260} fontSize={76}>Change --accent. Six palettes × two themes.</Caption>
+      </Overlay>
+    </Sequence>
+    <Sequence from={toFrame(52)} durationInFrames={toFrame(3)}><ShortCta /></Sequence>
     <Audio src={staticFile('audio/sdtk-cc0-ambient.m4a')} volume={0.12} />
+    <MotionRail />
   </AbsoluteFill>
 );

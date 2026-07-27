@@ -22,6 +22,16 @@ set -u
 
 [[ $# -gt 0 ]] || { echo "usage: start-hersocial-marketing-video.sh <sdtk-marketing args>" >&2; exit 2; }
 
+if [[ -n "$capture_composition_override" ]]; then
+  [[ "$capture_composition_override" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]] || {
+    echo "hersocial marketing video bootstrap failed: invalid capture composition" >&2
+    exit 2
+  }
+  # sdtk-marketing intentionally passes a bounded env to delegates. Bind this non-secret
+  # render selector into the delegate command so it reaches remotion-render.js.
+  SDTK_MARKETING_VIDEO_CMD_REMOTION="env SDTK_MARKETING_REMOTION_CAPTURE_COMPOSITION=$capture_composition_override $SDTK_MARKETING_VIDEO_CMD_REMOTION"
+fi
+
 env_args=(
   "PATH=${PATH:-/usr/local/bin:/usr/bin:/bin}"
   "HOME=/opt/data/hermes/control-plane/hersocial-marketing-video/home"
