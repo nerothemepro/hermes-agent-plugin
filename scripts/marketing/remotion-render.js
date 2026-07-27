@@ -20,7 +20,10 @@ const input = value('--input');
 const out = value('--out');
 const project = process.env.SDTK_MARKETING_REMOTION_PROJECT || '';
 const configuredComposition = process.env.SDTK_MARKETING_REMOTION_COMPOSITION || 'IntroBrand';
-const composition = capture ? 'SdtkTutorial' : configuredComposition;
+// Capture workflows default to the tutorial composition. A caller can select a different
+// evidence composition without changing the default non-capture intro configuration.
+const captureComposition = process.env.SDTK_MARKETING_REMOTION_CAPTURE_COMPOSITION || '';
+const composition = capture ? (captureComposition || 'SdtkTutorial') : configuredComposition;
 
 if (capture && !fs.statSync(capture, { throwIfNoEntry: false })?.isFile()) fail('--capture must point to a real file when supplied');
 if (!out) fail('--out is required');

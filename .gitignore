@@ -52,3 +52,9 @@ Thumbs.db
 # Backups
 *.bak
 *.bak.*
+
+# Remotion project dependencies
+media-pipeline/remotion/sdtk-tutorial/node_modules/
+media-pipeline/remotion/sdtk-tutorial/public/captures/
+.cache/
+.remotion/

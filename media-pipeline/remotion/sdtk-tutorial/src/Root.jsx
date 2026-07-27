@@ -1,6 +1,8 @@
 import {Composition} from 'remotion';
 import {Tutorial} from './Tutorial';
 import {IntroBrand} from './IntroBrand';
+import {HeroShowcase} from './HeroShowcase';
+import {TutorialEp, TutorialEpShort} from './TutorialEp';
 
 export const Root = () => (
   <>
@@ -20,6 +22,33 @@ export const Root = () => (
       fps={30}
       width={1920}
       height={1080}
+    />
+    <Composition
+      id="HeroShowcase"
+      component={HeroShowcase}
+      durationInFrames={2460}
+      fps={30}
+      width={1920}
+      height={1080}
+      defaultProps={{capture: ''}}
+    />
+    <Composition
+      id="TutorialEp"
+      component={TutorialEp}
+      durationInFrames={9000}
+      fps={30}
+      width={1920}
+      height={1080}
+      defaultProps={{capture: ''}}
+    />
+    <Composition
+      id="TutorialEpShort"
+      component={TutorialEpShort}
+      durationInFrames={1650}
+      fps={30}
+      width={1440}
+      height={2560}
+      defaultProps={{capture: ''}}
     />
   </>
 );
