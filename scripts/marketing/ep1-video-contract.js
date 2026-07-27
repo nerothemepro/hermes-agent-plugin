@@ -26,15 +26,31 @@ const longForm = {
   ],
 };
 
+const downloadChapter = {
+  durationSeconds: 90,
+  stages: [
+    {id: 'landing', start: 0, end: 18},
+    {id: 'download', start: 18, end: 30},
+    {id: 'unzip', start: 30, end: 55},
+    {id: 'offline', start: 55, end: 90},
+  ],
+};
+
 const shortForm = {
   size: {width: 1440, height: 2560},
   durationSeconds: 55,
+  actionSeconds: 52,
+  ctaSeconds: 3,
+  captureBand: {top: 620, height: 810},
+  minCaptionFontSize: 72,
+  minCtaFontSize: 72,
 };
 
 module.exports = {
   fps,
   motion: {maxStaticSeconds: 5},
   heroes,
+  downloadChapter,
   palettes: ['ember', 'aurora', 'nebula', 'rose', 'jade', 'azure'],
   themes: ['lantern-night', 'daybreak'],
   longForm,
