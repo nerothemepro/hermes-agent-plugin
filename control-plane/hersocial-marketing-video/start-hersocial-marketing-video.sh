@@ -6,6 +6,7 @@ set -euo pipefail
 # This script never adds --approve; attended upload remains the owner's explicit decision.
 profile_env=/opt/data/hermes-profiles/hersocial/.env
 marketing_env=/opt/data/hermes/control-plane/secrets/mkt-digest.env
+capture_composition_override="${HERSOCIAL_MARKETING_REMOTION_CAPTURE_COMPOSITION:-}"
 
 for required_file in "$profile_env" "$marketing_env"; do
   [[ -f "$required_file" ]] || { echo "hersocial marketing video bootstrap failed: environment source unavailable" >&2; exit 1; }
@@ -48,6 +49,10 @@ for optional_name in \
     env_args+=("${optional_name}=${!optional_name}")
   fi
 done
+
+if [[ -n "$capture_composition_override" ]]; then
+  env_args+=("SDTK_MARKETING_REMOTION_CAPTURE_COMPOSITION=$capture_composition_override")
+fi
 
 umask 077
 exec env -i "${env_args[@]}" sdtk-marketing "$@"

@@ -2,8 +2,9 @@ import {AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig} from
 
 const letters = ['S', 'D', 'T', 'K'];
 
-export const IntroBrand = () => {
-  const frame = useCurrentFrame();
+export const IntroBrand = ({compact = false}) => {
+  const rawFrame = useCurrentFrame();
+  const frame = compact ? rawFrame * 3 : rawFrame;
   const {fps} = useVideoConfig();
   const taglineOpacity = interpolate(frame, [54, 82, 155, 175], [0, 1, 1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   const lineScale = interpolate(frame, [20, 60], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
