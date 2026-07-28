@@ -23,7 +23,7 @@ const configuredComposition = process.env.SDTK_MARKETING_REMOTION_COMPOSITION ||
 // Capture workflows default to the tutorial composition. A caller can select a different
 // evidence composition without changing the default non-capture intro configuration.
 const captureComposition = process.env.SDTK_MARKETING_REMOTION_CAPTURE_COMPOSITION || '';
-const composition = capture ? (captureComposition || 'SdtkTutorial') : configuredComposition;
+const composition = capture ? (captureComposition || configuredComposition) : configuredComposition;
 
 if (capture && !fs.statSync(capture, { throwIfNoEntry: false })?.isFile()) fail('--capture must point to a real file when supplied');
 if (!out) fail('--out is required');
@@ -49,11 +49,38 @@ if (capture) {
   captureProp = `captures/${captureName}`;
 }
 
+let props = { capture: captureProp, input };
+if (composition === 'OneSpine' || composition === 'OneSpineVertical') {
+  if (!input) fail('one-spine render requires --input <capture-manifest.json>');
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(input, 'utf8'));
+  } catch {
+    fail('one-spine render input must be readable JSON');
+  }
+  if (!manifest.captures || typeof manifest.captures !== 'object') {
+    fail('one-spine render input must declare a captures object');
+  }
+  const mappedCaptures = {};
+  for (const [key, source] of Object.entries(manifest.captures)) {
+    if (typeof source !== 'string' || !fs.statSync(source, { throwIfNoEntry: false })?.isFile()) {
+      fail(`one-spine capture "${key}" is missing or is not a file`);
+    }
+    const extension = path.extname(source) || '.mp4';
+    const relative = path.join('captures', 'one-spine', `${key}${extension}`);
+    const destination = path.join(project, 'public', relative);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+    mappedCaptures[key] = relative.replaceAll(path.sep, '/');
+  }
+  props = { captures: mappedCaptures, facts: manifest.facts || {} };
+}
+
 fs.mkdirSync(path.dirname(out), { recursive: true });
-const props = JSON.stringify({ capture: captureProp, input });
+const serializedProps = JSON.stringify(props);
 const result = spawnSync(
   remotion,
-  ['render', entryPoint, composition, out, '--props', props],
+  ['render', entryPoint, composition, out, '--props', serializedProps],
   { cwd: project, stdio: 'inherit', env: process.env },
 );
 if (result.error) fail(`renderer could not start: ${result.error.code || result.error.message}`);

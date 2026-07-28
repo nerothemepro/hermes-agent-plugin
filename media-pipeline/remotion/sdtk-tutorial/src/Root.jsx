@@ -3,6 +3,7 @@ import {Tutorial} from './Tutorial';
 import {IntroBrand} from './IntroBrand';
 import {HeroShowcase} from './HeroShowcase';
 import {TutorialEp, TutorialEpShort} from './TutorialEp';
+import {OneSpine, OneSpineVertical} from './OneSpine';
 
 export const Root = () => (
   <>
@@ -49,6 +50,24 @@ export const Root = () => (
       width={1440}
       height={2560}
       defaultProps={{capture: ''}}
+    />
+    <Composition
+      id="OneSpine"
+      component={OneSpine}
+      durationInFrames={2250}
+      fps={30}
+      width={1920}
+      height={1080}
+      defaultProps={{captures: {}, facts: {}}}
+    />
+    <Composition
+      id="OneSpineVertical"
+      component={OneSpineVertical}
+      durationInFrames={1350}
+      fps={30}
+      width={1080}
+      height={1920}
+      defaultProps={{captures: {}, facts: {}}}
     />
   </>
 );
