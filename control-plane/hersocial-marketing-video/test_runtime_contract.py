@@ -13,6 +13,9 @@ class MarketingVideoRuntimeContractTest(unittest.TestCase):
 
         self.assertIn("SDTK_MARKETING_SOCIAL_COPY_CMD", text)
         self.assertIn("SDTK_MARKETING_SOCIAL_COPY_TIMEOUT_MS", text)
+        self.assertIn("LMSTUDIO_BASE_URL", text)
+        self.assertIn("LM_API_KEY", text)
+        self.assertIn("LLM_DEFAULT_MODEL", text)
         self.assertIn("exec env -i", text)
         self.assertIn("mkt-digest.env", text)
         self.assertIn('stat -c %a "$marketing_env"', text)
