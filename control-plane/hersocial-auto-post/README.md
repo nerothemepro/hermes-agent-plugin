@@ -12,7 +12,9 @@ Deterministic Facebook Page scheduling for owner-approved SDTK posts. The runner
 - The check invocation is configured only through `HERSOCIAL_MARKETING_CHECK_COMMAND`. The interim value is `node /workspace/sdtk-internal/products/sdtk-marketing/distribution/sdtk-marketing-kit/bin/sdtk-marketing.js`; change only this value to `sdtk-marketing` after the npm package is published.
 - The runner does not retry Facebook publication automatically.
 - Exact existing Page content is adopted instead of duplicated.
-- Personal-profile sharing and video publishing are out of scope.
+- Personal-profile sharing and legacy manifest video publishing are out of scope.
+- A `social-video-youtube-*` or `social-video-facebook-*` exact approval is routed to the deterministic publisher bridge. It resolves one matching `sdtk.marketing-social-publisher.v1` ledger record, verifies the same SHA, and calls the existing sha-gated upload delegate; other keys retain the legacy attended runner. A second identical approval reads the publish record and is idempotent.
+- The router only confirms a completed publisher response when it carries the matching key/SHA and a full HTTPS permalink. X remains copy-only until a dedicated publisher adapter is separately installed.
 
 ## Manifest Approval Flow
 
