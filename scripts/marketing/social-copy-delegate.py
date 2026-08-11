@@ -50,14 +50,42 @@ def timeout_seconds() -> int:
 
 def prompt_for(source: dict) -> str:
     allowed = source.get("allowed_claims", [])
+    claim_ids = [claim.get("id") for claim in allowed if isinstance(claim.get("id"), str) and claim.get("id")]
+    if not claim_ids:
+        raise ValueError("source has no allowed claim IDs")
+
+    variants = []
+    for platform in source.get("platforms", []):
+        for angle in source.get("angles", []):
+            variant = {
+                "variant_id": f"{platform}-{angle}",
+                "platform": platform,
+                "angle": angle,
+                "language": "en",
+                "claim_refs": ["REPLACE_WITH_ALLOWED_CLAIM_ID_THAT_SUPPORTS_THIS_VARIANT"],
+            }
+            if platform == "x":
+                variant.update({"format": "single", "posts": ["WRITE ONE ENGLISH X POST HERE"]})
+            elif platform == "facebook":
+                variant.update({"format": "video_post", "page_copy": "WRITE ENGLISH FACEBOOK PAGE COPY HERE", "first_comment": "WRITE OPTIONAL ENGLISH FIRST COMMENT HERE"})
+            elif platform == "youtube":
+                variant.update({"format": "video", "title": "WRITE ENGLISH YOUTUBE TITLE HERE", "description": "WRITE ENGLISH YOUTUBE DESCRIPTION HERE", "tags": ["SDTK"], "pinned_comment": "WRITE OPTIONAL ENGLISH PINNED COMMENT HERE"})
+            else:
+                raise ValueError(f"unsupported source platform: {platform}")
+            variants.append(variant)
+
+    template = {"canonical_concept": "WRITE ONE ENGLISH CONCEPT", "variants": variants}
     return "\n".join([
         "Create English social-marketing candidates for an owner-reviewed SDTK video.",
         "Return one JSON object only. Do not use markdown or prose outside JSON.",
         "Use only the exact allowed_claim IDs and claims in the source. Do not invent numbers, features, customer results, or unsupported claims.",
-        "Create every requested platform/angle pair. Each variant must be English and cite one or more allowed claim IDs.",
-        "X variants: format single or thread, with posts array. Facebook: format video_post, page_copy, optional first_comment. YouTube: format video, title, description, non-empty tags, optional pinned_comment.",
-        "Return exactly this shape: {\"canonical_concept\": string, \"variants\": [ ... ]}.",
-        "Allowed claim IDs: " + json.dumps([claim.get("id") for claim in allowed]),
+        "Complete the exact JSON template below. Preserve every key, variant_id, platform, angle, language, format, and array/object shape exactly.",
+        "Replace every claim_refs placeholder with one or more exact allowed IDs that materially support the actual wording in that variant. Never omit claim_refs or leave any placeholder text.",
+        "For X, posts must be an array of plain strings, never objects. For Facebook, use top-level page_copy and optional first_comment, never a video_post object.",
+        "For YouTube, tags must be a non-empty array of plain strings. Do not add root schema_version, project_id, source_identity_sha256, or any fields not in the template.",
+        "Allowed claim IDs: " + json.dumps(claim_ids),
+        "Required output template:",
+        json.dumps(template, ensure_ascii=True, separators=(",", ":")),
         "Source pack:",
         json.dumps(source, ensure_ascii=True, separators=(",", ":")),
     ])
@@ -85,7 +113,7 @@ def response_json(content: str) -> dict:
 def generate(source: dict, base_url: str, model: str, api_key: str | None) -> dict:
     payload = {
         "model": model,
-        "temperature": 0.2,
+        "temperature": 0,
         "messages": [
             {"role": "system", "content": "You are a constrained copy generator. Follow the source contract exactly."},
             {"role": "user", "content": prompt_for(source)},
