@@ -68,6 +68,16 @@ for optional_name in \
 done
 
 umask 077
+
+# Video publisher approvals use a dedicated deterministic dispatcher. It resolves only a matching
+# social publisher record and invokes the sha-gated marketing CLI; all legacy manifest keys retain
+# the existing attended runner unchanged.
+if [[ "${1:-}" == "--record-approval" && "${2:-}" == social-video-* ]]; then
+  exec env -i "${env_args[@]}" \
+    /usr/bin/python3 /workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/hersocial_social_publisher_dispatcher.py \
+      "$@"
+fi
+
 exec env -i "${env_args[@]}" \
   /usr/bin/python3 /workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/hersocial_attended_runner.py \
     --posts-dir "${HERSOCIAL_AUTO_POST_POSTS_DIR:-/workspace/hermes-agent-plugin/control-plane/hersocial-auto-post/posts}" \

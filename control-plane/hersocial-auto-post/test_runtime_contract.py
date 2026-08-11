@@ -31,6 +31,12 @@ class RuntimeContractTest(unittest.TestCase):
         self.assertNotIn("echo $FB_PAGE_TOKEN", text)
         self.assertNotIn("set -x", text)
 
+    def test_social_video_approval_uses_deterministic_publisher_dispatcher(self):
+        text = WRAPPER.read_text(encoding="utf-8")
+        self.assertIn('social-video-*', text)
+        self.assertIn('hersocial_social_publisher_dispatcher.py', text)
+        self.assertIn('SDTK_MARKETING_HOME', text)
+
     def test_supervisor_program_is_disabled_by_default_and_persistent(self):
         text = PROGRAM.read_text(encoding="utf-8")
         self.assertIn("autostart=true", text)
