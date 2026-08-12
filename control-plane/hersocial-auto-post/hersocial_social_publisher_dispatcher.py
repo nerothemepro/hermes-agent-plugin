@@ -84,6 +84,17 @@ def absolute_video_url(platform: str, value: object) -> str | None:
     return None
 
 
+def delivery_state(value: dict) -> tuple[str, str | None, str | None] | None:
+    status = value.get("status")
+    if status not in {"uploaded", "published"}:
+        return None
+    visibility_state = value.get("visibility_state")
+    next_action = value.get("next_action")
+    if status == "uploaded" and not isinstance(visibility_state, str):
+        return None
+    return status, visibility_state if isinstance(visibility_state, str) else None, next_action if isinstance(next_action, str) else None
+
+
 @contextmanager
 def approval_lock(post_key: str, home: Path):
     lock_dir = home / ".approval-locks"
@@ -133,12 +144,15 @@ def record_approval(
             video_url = absolute_video_url(record["platform"], published.get("video_url"))
             if video_url is None:
                 raise DispatchFailure("existing_publish_invalid_permalink")
+            status = "published" if published.get("published_at") else str(published.get("upload_state") or "published")
             return {
-                "status": "published",
+                "status": status,
                 "post_key": post_key,
                 "content_sha256": digest,
                 "video_url": video_url,
                 "publish_record": str(home / "publishes" / f"{record['platform']}-{record['publisher_payload']['assetId']}.json"),
+                "visibility_state": published.get("visibility_state"),
+                "next_action": published.get("next_action"),
                 "idempotent": True,
             }
         command = [
@@ -148,19 +162,25 @@ def record_approval(
             "--json",
         ]
         result = runner(command)
-        if not isinstance(result, dict) or result.get("status") != "published":
+        if not isinstance(result, dict):
+            raise DispatchFailure("publisher_command_unconfirmed")
+        state = delivery_state(result)
+        if state is None:
             raise DispatchFailure("publisher_command_unconfirmed")
         if result.get("post_key") != post_key or result.get("content_sha256") != digest:
             raise DispatchFailure("publisher_command_identity_mismatch")
         video_url = absolute_video_url(record["platform"], result.get("video_url"))
         if video_url is None:
             raise DispatchFailure("publisher_command_invalid_permalink")
+        status, visibility_state, next_action = state
         return {
-            "status": "published",
+            "status": status,
             "post_key": post_key,
             "content_sha256": digest,
             "video_url": video_url,
             "publish_record": result.get("publish_record"),
+            "visibility_state": visibility_state,
+            "next_action": next_action,
             "follow_up": result.get("follow_up"),
             "idempotent": False,
         }
