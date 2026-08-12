@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -71,6 +73,37 @@ def existing_publish(record: dict, home: Path) -> dict | None:
     return published
 
 
+def absolute_video_url(platform: str, value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.startswith("https://"):
+        return value
+    if platform == "facebook" and value.startswith("/"):
+        return "https://www.facebook.com" + value
+    return None
+
+
+@contextmanager
+def approval_lock(post_key: str, home: Path):
+    lock_dir = home / ".approval-locks"
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(lock_dir / (post_key + ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as error:
+        raise DispatchFailure("approval_lock_unavailable") from error
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError as error:
+        raise DispatchFailure("approval_lock_unavailable") from error
+
+
 def default_runner(args: list[str]) -> dict:
     binary = Path(os.environ.get("HERSOCIAL_MARKETING_VIDEO_BIN", str(DEFAULT_VIDEO_BIN)))
     if not binary.is_file():
@@ -94,36 +127,43 @@ def record_approval(
     runner: Callable[[list[str]], dict] = default_runner,
 ) -> dict:
     record = find_publisher_record(post_key, digest, home)
-    published = existing_publish(record, home)
-    if published is not None:
+    with approval_lock(post_key, home):
+        published = existing_publish(record, home)
+        if published is not None:
+            video_url = absolute_video_url(record["platform"], published.get("video_url"))
+            if video_url is None:
+                raise DispatchFailure("existing_publish_invalid_permalink")
+            return {
+                "status": "published",
+                "post_key": post_key,
+                "content_sha256": digest,
+                "video_url": video_url,
+                "publish_record": str(home / "publishes" / f"{record['platform']}-{record['publisher_payload']['assetId']}.json"),
+                "idempotent": True,
+            }
+        command = [
+            "video", "social", "publish", record["project_id"],
+            "--platform", record["platform"],
+            "--approve", digest,
+            "--json",
+        ]
+        result = runner(command)
+        if not isinstance(result, dict) or result.get("status") != "published":
+            raise DispatchFailure("publisher_command_unconfirmed")
+        if result.get("post_key") != post_key or result.get("content_sha256") != digest:
+            raise DispatchFailure("publisher_command_identity_mismatch")
+        video_url = absolute_video_url(record["platform"], result.get("video_url"))
+        if video_url is None:
+            raise DispatchFailure("publisher_command_invalid_permalink")
         return {
             "status": "published",
             "post_key": post_key,
             "content_sha256": digest,
-            "video_url": published.get("video_url"),
-            "publish_record": str(home / "publishes" / f"{record['platform']}-{record['publisher_payload']['assetId']}.json"),
-            "idempotent": True,
+            "video_url": video_url,
+            "publish_record": result.get("publish_record"),
+            "follow_up": result.get("follow_up"),
+            "idempotent": False,
         }
-    command = [
-        "video", "social", "publish", record["project_id"],
-        "--platform", record["platform"],
-        "--approve", digest,
-        "--json",
-    ]
-    result = runner(command)
-    if not isinstance(result, dict) or result.get("status") != "published":
-        raise DispatchFailure("publisher_command_unconfirmed")
-    if result.get("post_key") != post_key or result.get("content_sha256") != digest:
-        raise DispatchFailure("publisher_command_identity_mismatch")
-    return {
-        "status": "published",
-        "post_key": post_key,
-        "content_sha256": digest,
-        "video_url": result.get("video_url"),
-        "publish_record": result.get("publish_record"),
-        "follow_up": result.get("follow_up"),
-        "idempotent": False,
-    }
 
 
 def main() -> int:

@@ -2,7 +2,9 @@
 import hashlib
 import importlib.util
 import json
+import multiprocessing
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -16,6 +18,19 @@ def load_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def lock_probe_worker(module_path, home_path, post_key, digest, marker_path):
+    spec = importlib.util.spec_from_file_location("hersocial_social_publisher_dispatcher_child", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    def runner(_):
+        Path(marker_path).write_text("runner-called", encoding="utf-8")
+        return {"status": "published", "post_key": post_key, "content_sha256": digest, "video_url": "https://youtu.be/example"}
+
+    module.record_approval(post_key, digest, Path(home_path), runner)
 
 
 def publisher_record(project_id, platform, digest):
@@ -71,6 +86,35 @@ class SocialPublisherDispatcherTest(unittest.TestCase):
         result = self.module.record_approval(self.record["post_key"], self.digest, self.home, lambda _: self.fail("must not run"))
         self.assertEqual(result["status"], "published")
         self.assertEqual(result["video_url"], "https://youtu.be/already-published")
+
+    def test_existing_relative_facebook_permalink_is_normalized_before_return(self):
+        record = publisher_record("preview-studio", "facebook", self.digest)
+        target = self.home / "video-projects" / "preview-studio" / "social"
+        (target / "publisher-facebook.json").write_text(json.dumps(record), encoding="utf-8")
+        publishes = self.home / "publishes"
+        publishes.mkdir(parents=True)
+        (publishes / ("facebook-" + record["publisher_payload"]["assetId"] + ".json")).write_text(json.dumps({
+            "approved_sha": self.digest,
+            "video_url": "/reel/example/",
+        }), encoding="utf-8")
+
+        result = self.module.record_approval(record["post_key"], self.digest, self.home, lambda _: self.fail("must not run"))
+
+        self.assertEqual(result["video_url"], "https://www.facebook.com/reel/example/")
+
+    def test_same_post_key_is_serialized_across_processes(self):
+        marker = self.home / "runner-marker"
+        with self.module.approval_lock(self.record["post_key"], self.home):
+            process = multiprocessing.Process(
+                target=lock_probe_worker,
+                args=(str(MODULE_PATH), str(self.home), self.record["post_key"], self.digest, str(marker)),
+            )
+            process.start()
+            time.sleep(0.15)
+            self.assertFalse(marker.exists())
+        process.join(timeout=3)
+        self.assertEqual(process.exitcode, 0)
+        self.assertTrue(marker.exists())
 
     def test_duplicate_matching_records_fail_closed(self):
         extra = self.home / "video-projects" / "other" / "social"
