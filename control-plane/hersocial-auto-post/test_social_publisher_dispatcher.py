@@ -87,6 +87,28 @@ class SocialPublisherDispatcherTest(unittest.TestCase):
         self.assertEqual(result["status"], "published")
         self.assertEqual(result["video_url"], "https://youtu.be/already-published")
 
+    def test_unpublished_facebook_upload_keeps_uploaded_status(self):
+        record = publisher_record("preview-studio", "facebook", self.digest)
+        target = self.home / "video-projects" / "preview-studio" / "social"
+        (target / "publisher-facebook.json").write_text(json.dumps(record), encoding="utf-8")
+
+        def runner(_):
+            return {
+                "status": "uploaded",
+                "post_key": record["post_key"],
+                "content_sha256": self.digest,
+                "video_url": "https://www.facebook.com/reel/draft-example/",
+                "visibility_state": "unpublished",
+                "next_action": "manual_visibility_review_required",
+            }
+
+        result = self.module.record_approval(record["post_key"], self.digest, self.home, runner)
+
+        self.assertEqual(result["status"], "uploaded")
+        self.assertEqual(result["visibility_state"], "unpublished")
+        self.assertEqual(result["video_url"], "https://www.facebook.com/reel/draft-example/")
+        self.assertEqual(result["next_action"], "manual_visibility_review_required")
+
     def test_existing_relative_facebook_permalink_is_normalized_before_return(self):
         record = publisher_record("preview-studio", "facebook", self.digest)
         target = self.home / "video-projects" / "preview-studio" / "social"
