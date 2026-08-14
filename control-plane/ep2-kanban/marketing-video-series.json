@@ -1,0 +1,17 @@
+{
+  "schema_version": "hermes.marketing-video-series.v1",
+  "series_id": "sdtk-build-with-proof-r2",
+  "title": "SDTK Build With Proof marketing-video series",
+  "episodes": [
+    { "backlog_id": "BK-39901", "episode": "EP1", "title": "Stop Describing UI Bugs to AI", "status": "DONE" },
+    { "backlog_id": "BK-39902", "episode": "EP2", "title": "What Is Your AI Coding Actually Costing?", "status": "IN_PROGRESS" },
+    { "backlog_id": "BK-39903", "episode": "EP3", "title": "From Client Comment to a Precise Patch", "status": "TODO" },
+    { "backlog_id": "BK-39904", "episode": "EP4", "title": "One Requirement, a Reviewable Plan", "status": "TODO" },
+    { "backlog_id": "BK-39905", "episode": "EP5", "title": "Your Markdown Is Already a Kanban Board", "status": "TODO" },
+    { "backlog_id": "BK-39906", "episode": "EP6", "title": "AI Wrote the Patch. The Gate Caught the Problem.", "status": "TODO" },
+    { "backlog_id": "BK-39907", "episode": "EP7", "title": "Your Repo Should Remember Between Agent Sessions", "status": "TODO" },
+    { "backlog_id": "BK-39908", "episode": "EP8", "title": "Build a Local Second Brain for an Agent", "status": "TODO" },
+    { "backlog_id": "BK-39909", "episode": "EP9", "title": "An Agent Workflow That Stops for You", "status": "TODO" },
+    { "backlog_id": "BK-39910", "episode": "EP10", "title": "How This Channel Refuses to Fake Proof", "status": "TODO" }
+  ]
+}
