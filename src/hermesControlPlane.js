@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
+const { EP2_PROFILES, EP2_TEMPLATE_ID, buildEp2RuntimeMap, buildEp2Workflow } = require('./hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const DEFAULT_TEMPLATE_ROOT = path.join(DEFAULT_PROJECT_PATH, 'control-plane', 'templates');
@@ -122,6 +123,9 @@ function renderInstruction(templateId, params, projectPath) {
 }
 
 function buildWorkflow(template, params, options = {}) {
+  if (template.template_id === EP2_TEMPLATE_ID) {
+    return buildEp2Workflow(path.resolve(options.projectPath || DEFAULT_PROJECT_PATH));
+  }
   const projectPath = path.resolve(options.projectPath || DEFAULT_PROJECT_PATH);
   const instruction = renderInstruction(template.template_id, params, projectPath);
   const taskId = template.template_id === 'status' ? 'status_summary' : template.template_id;
@@ -155,6 +159,9 @@ function buildWorkflow(template, params, options = {}) {
 }
 
 function buildRuntimeMap(template) {
+  if (template.template_id === EP2_TEMPLATE_ID) {
+    return buildEp2RuntimeMap(template.runtime);
+  }
   const role = template.template_id === 'status' ? 'orchestrator' : 'researcher';
   return {
     schema_version: 'sdtk.agent-runtime-map.v1',
@@ -186,6 +193,7 @@ function previewTemplate(templateId, rawParams, options = {}) {
   const workflow = buildWorkflow(template, params, options);
   const runtimeMap = buildRuntimeMap(template);
   const taskCount = workflow.stages.filter((stage) => stage.type === 'task').length;
+  const profiles = template.template_id === EP2_TEMPLATE_ID ? EP2_PROFILES : [template.allowed_profile];
   const gateCount = workflow.stages.filter((stage) => stage.type === 'human_gate').length;
   return {
     status: 'held_for_exact_dispatch_approval',
@@ -197,7 +205,8 @@ function previewTemplate(templateId, rawParams, options = {}) {
     task_count: taskCount,
     gate_count: gateCount,
     dispatch_count: taskCount,
-    profile: template.allowed_profile,
+    profile: template.template_id === EP2_TEMPLATE_ID ? 'multi-profile' : template.allowed_profile,
+    profiles,
     deadline_ms: template.runtime.deadline_ms,
     deadline_minutes: template.runtime.deadline_ms / 60000,
     cost_band: template.cost_band,

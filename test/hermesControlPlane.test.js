@@ -69,3 +69,20 @@ test('Hermes control plane Phase A templates', async (t) => {
     assert.strictEqual(workflow.stages[0].role, 'researcher');
   });
 });
+
+test('EP2 usage template builds the fixed multi-profile, human-gated workflow', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
+  assert.strictEqual(preview.profile, 'multi-profile');
+  assert.deepStrictEqual(preview.profiles, ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial']);
+  assert.strictEqual(preview.task_count, 7);
+  assert.strictEqual(preview.gate_count, 5);
+  assert.deepStrictEqual(preview.workflow.stages.filter((stage) => stage.type === 'task').map((stage) => stage.id), [
+    'research_evidence', 'episode_lessons', 'script_package', 'product_capture', 'episode_render', 'social_package', 'lessons_record',
+  ]);
+  assert.deepStrictEqual(preview.workflow.stages.filter((stage) => stage.type === 'human_gate').map((stage) => stage.id), [
+    'owner_script_review', 'owner_assets_review', 'owner_picture_lock', 'owner_social_review', 'owner_lessons_review',
+  ]);
+  assert.deepStrictEqual(Object.keys(preview.runtime_map.roles).sort(), ['developer', 'orchestrator', 'researcher', 'social', 'video', 'wiki']);
+  assert.strictEqual(preview.runtime_map.roles.video.config.profile, 'hervid');
+  assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
+});

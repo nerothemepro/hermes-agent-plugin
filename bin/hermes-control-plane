@@ -24,7 +24,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log(`Hermes Control Plane Phase A\n\nUsage:\n  hermes-control-plane validate --template <site_audit|research_brief|status>\n  hermes-control-plane preview --template <site_audit|research_brief|status> --params '<json>'\n\npreview is read-only and always holds for exact owner approval. It never dispatches a worker.`);
+  console.log(`Hermes Control Plane Phase A\n\nUsage:\n  hermes-control-plane validate --template <site_audit|research_brief|marketing_video_ep_usage|status>\n  hermes-control-plane preview --template <site_audit|research_brief|marketing_video_ep_usage|status> --params '<json>'\n\npreview is read-only and always holds for exact owner approval. It never dispatches a worker.`);
 }
 
 function main() {
