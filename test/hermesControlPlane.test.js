@@ -86,3 +86,21 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.strictEqual(preview.runtime_map.roles.video.config.profile, 'hervid');
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
 });
+
+test('EP2 runtime map assigns each native Kanban CLI role its real profile home', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
+  const expectedProfiles = {
+    researcher: 'herresearch',
+    wiki: 'herwiki',
+    orchestrator: 'herorches',
+    developer: 'herdev',
+    video: 'hervid',
+    social: 'hersocial',
+  };
+
+  assert.strictEqual(preview.runtime_map.hermes.profiles_source, '/opt/data/hermes-profiles');
+  for (const [role, profile] of Object.entries(expectedProfiles)) {
+    assert.strictEqual(preview.runtime_map.roles[role].config.profile, profile);
+    assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_HOME, `/opt/data/hermes-profiles/${profile}`);
+  }
+});

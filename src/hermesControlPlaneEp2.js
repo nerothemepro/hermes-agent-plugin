@@ -3,7 +3,7 @@
 const EP2_TEMPLATE_ID = 'marketing_video_ep_usage';
 const EP2_PROFILES = ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial'];
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
-const HERMES_HOME = '/opt/data/hermes';
+const HERMES_PROFILE_BASE = '/opt/data/hermes-profiles';
 
 function task(id, role, instruction, depends_on = []) {
   return {
@@ -74,7 +74,7 @@ function role(profile, runtime) {
       backend: 'kanban-cli',
       profile,
       hermes_bin: HERMES_BIN,
-      env: { HERMES_HOME },
+      env: { HERMES_HOME: `${HERMES_PROFILE_BASE}/${profile}` },
       board: runtime.board,
       live_ack: true,
       cancel_action: runtime.cancel_action,
@@ -87,7 +87,7 @@ function buildEp2RuntimeMap(runtime) {
   return {
     schema_version: 'sdtk.agent-runtime-map.v1',
     environment_id: 'hermes-native-kanban-attended',
-    hermes: { profiles_source: '/opt/data/hermes/profiles' },
+    hermes: { profiles_source: HERMES_PROFILE_BASE },
     roles: {
       researcher: role('herresearch', runtime),
       wiki: role('herwiki', runtime),
