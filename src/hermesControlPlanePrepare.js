@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 
+const { EP2_TEMPLATE_ID } = require('./hermesControlPlaneEp2');
+
 const {
   DEFAULT_PROJECT_PATH,
   DEFAULT_REGISTRY_DIR,
@@ -27,10 +29,33 @@ function buildRegistryRecord(preview, runId, projectPath) {
   };
 }
 
+function findReusableEp2Record(registryDir, projectPath) {
+  let entries;
+  try { entries = fs.readdirSync(registryDir, { withFileTypes: true }); } catch (_) { return null; }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    try {
+      const record = JSON.parse(fs.readFileSync(path.join(registryDir, entry.name), 'utf8'));
+      if (record.template_id !== EP2_TEMPLATE_ID || !RUN_ID_PATTERN.test(record.run_id || '')) continue;
+      const expected = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', record.run_id, 'state.json');
+      if (path.resolve(record.state_path || '') !== path.resolve(expected)) continue;
+      const state = JSON.parse(fs.readFileSync(expected, 'utf8'));
+      if (!['completed', 'failed', 'cancelled'].includes(state.status)) return { record, recordPath: path.join(registryDir, entry.name) };
+    } catch (_) { /* malformed records never become reusable */ }
+  }
+  return null;
+}
+
 function prepareTemplate(templateId, rawParams, options = {}) {
   const projectPath = path.resolve(options.projectPath || DEFAULT_PROJECT_PATH);
   const registryDir = path.resolve(options.registryDir || DEFAULT_REGISTRY_DIR);
   const preview = previewTemplate(templateId, rawParams, { ...options, projectPath });
+  if (templateId === EP2_TEMPLATE_ID) {
+    const reusable = findReusableEp2Record(registryDir, projectPath);
+    if (reusable) {
+      return { status: 'prepared_waiting_for_exact_dispatch_approval', run_id: reusable.record.run_id, registry_path: reusable.recordPath, registry_record: reusable.record, exact_dispatch_approval: `APPROVE DISPATCH ${reusable.record.run_id}`, preview, reused: true };
+    }
+  }
   const stagingRoot = path.join(projectPath, '.sdtk');
   fs.mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
   const stagingDir = fs.mkdtempSync(path.join(stagingRoot, 'control-plane-stage-'));
@@ -85,4 +110,4 @@ function prepareTemplate(templateId, rawParams, options = {}) {
   }
 }
 
-module.exports = { buildRegistryRecord, prepareTemplate };
+module.exports = { buildRegistryRecord, findReusableEp2Record, prepareTemplate };

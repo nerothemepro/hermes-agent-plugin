@@ -9,14 +9,14 @@ Each bundle lives in `control-plane/templates/<template-id>/template.json` and
 pins its workflow, runtime map, allowed profile, deadline, instructions, side
 effects, cleanup policy, and strict parameter schema.
 
-The only Phase A templates are:
+The fixed templates are:
 
 - `site_audit` -> `herresearch`
 - `research_brief` -> `herresearch`
 - `status` -> `herorches`
+- `marketing_video_ep_usage` -> fixed attended multi-profile Episode 2 workflow
 
-All Phase A work is read-only. `wiki_ingest`, social publishing, media work,
-fan-out, and free-form workflow JSON are deliberately out of scope.
+Templates remain fixed and attended. Existing research/status templates are read-only. The Episode 2 template permits only the bounded local capture/render and checked social-preparation stages stated in its manifest; it never publishes, auto-approves, or accepts free-form workflow JSON.
 
 ## Operator commands
 
@@ -25,6 +25,7 @@ node bin/hermes-control-plane validate --template site_audit
 node bin/hermes-control-plane preview --template site_audit --params '{}'
 node bin/hermes-control-plane preview --template research_brief --params '{"topic":"Hermes Kanban lifecycle"}'
 node bin/hermes-control-plane preview --template status --params '{"run_id":"run_mrexaq5m_4b7d0c"}'
+node bin/hermes-control-plane validate --template marketing_video_ep_usage
 ```
 
 `preview` is read-only. It validates and renders only in memory, then reports
