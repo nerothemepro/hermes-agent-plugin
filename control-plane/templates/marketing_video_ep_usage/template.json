@@ -1,8 +1,8 @@
 {
   "schema_version": "hermes.control-plane-template.v1",
   "template_id": "marketing_video_ep_usage",
-  "version": "r1",
-  "description": "Fixed attended Episode 2 marketing-video workflow: See Your Real AI Cost in One Command.",
+  "version": "r2",
+  "description": "Fixed attended Episode 2 marketing-video workflow with canonical native evidence and project-local wiki retrieval.",
   "allowed_profile": "multi-profile",
   "cost_band": "high",
   "side_effects": {

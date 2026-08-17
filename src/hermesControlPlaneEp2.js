@@ -22,12 +22,12 @@ function gate(id, depends_on, prompt) {
 
 function instruction(stage, projectPath) {
   const outputRoot = `${projectPath}/.sdtk/agent-runtime/runs/<run_id>/reports`;
-  const shared = 'Do not publish, send external messages, use credentials, or create child tasks. Record only factual evidence in the assigned task result and native Hermes Kanban lifecycle.';
+  const shared = 'Do not publish, send external messages, use credentials, or create child tasks. Complete the native Hermes Kanban card with a non-empty summary and structured metadata: validation_status success, path, run_id, task_id, idempotency_key, and either verification_evidence or findings. Each finding must include claim, evidence, and source. Do not put canonical evidence only inside prose.';
   switch (stage) {
     case 'research_evidence':
-      return `Build a bounded public evidence pack for Episode 2, "See Your Real AI Cost in One Command". Identify the solo-founder or technical-lead pain point around unknown AI spend, traceability, and usage visibility. Separate supported public facts, source URLs, observations, unknowns, and claims that must not be used. Do not claim product outcomes or metrics without direct evidence. ${shared}`;
+      return `Build a bounded public evidence pack for Episode 2, "See Your Real AI Cost in One Command". Identify the solo-founder or technical-lead pain point around unknown AI spend, traceability, and usage visibility. Separate supported public facts, source URLs, observations, unknowns, and claims that must not be used. Do not claim product outcomes or metrics without direct evidence. Use one structured finding per supported claim. ${shared}`;
     case 'episode_lessons':
-      return `Retrieve only accepted lessons relevant to the prior SDTK marketing-video episode: product capture dominance, narration, readable layout, honest claims, motion, and attended publishing. Cite the canonical local artifact paths used. Return unknown when no accepted lesson exists. ${shared}`;
+      return `Work from the controller project workspace at ${projectPath}. Retrieve only accepted lessons relevant to the prior SDTK marketing-video episode: product capture dominance, narration, readable layout, honest claims, motion, and attended publishing. Search the project-local SDTK-WIKI first, including docs/HERMES_GENVIDEO_RUNBOOK.md and docs/HERMES_GENVIDEO_IMPROVEMENT_PLAN.md when present. Cite canonical local artifact paths used. Return unknown when no accepted lesson exists. ${shared}`;
     case 'script_package':
       return `Synthesize the Episode 2 English script package from the completed evidence and lessons tasks. The product proof must show the real sdtk usage command and its factual output. Include claim ledger, shot list, narration draft, CTA, and a list of evidence files expected under ${outputRoot}. Do not render, publish, or approve anything. ${shared}`;
     case 'product_capture':
@@ -65,7 +65,7 @@ function buildEp2Workflow(projectPath) {
   };
 }
 
-function role(profile, runtime) {
+function role(profile, runtime, options = {}) {
   return {
     adapter: 'hermes-live',
     module: 'sdtk-agent-hermes-adapter',
@@ -79,6 +79,7 @@ function role(profile, runtime) {
       live_ack: true,
       cancel_action: runtime.cancel_action,
       deadline_ms: runtime.deadline_ms,
+      ...(options.workspace ? { workspace: options.workspace } : {}),
     },
   };
 }
@@ -90,7 +91,7 @@ function buildEp2RuntimeMap(runtime) {
     hermes: { profiles_source: HERMES_PROFILE_BASE },
     roles: {
       researcher: role('herresearch', runtime),
-      wiki: role('herwiki', runtime),
+      wiki: role('herwiki', runtime, { workspace: 'project_path' }),
       orchestrator: role('herorches', runtime),
       developer: role('herdev', runtime),
       video: role('hervid', runtime),

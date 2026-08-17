@@ -84,6 +84,8 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   ]);
   assert.deepStrictEqual(Object.keys(preview.runtime_map.roles).sort(), ['developer', 'orchestrator', 'researcher', 'social', 'video', 'wiki']);
   assert.strictEqual(preview.runtime_map.roles.video.config.profile, 'hervid');
+  assert.strictEqual(preview.runtime_map.roles.wiki.config.workspace, 'project_path');
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'episode_lessons').params.instruction, /project-local SDTK-WIKI/);
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
 });
 
