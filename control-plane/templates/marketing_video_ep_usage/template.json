@@ -1,15 +1,40 @@
 {
   "schema_version": "hermes.control-plane-template.v1",
   "template_id": "marketing_video_ep_usage",
-  "version": "r2",
-  "description": "Fixed attended Episode 2 marketing-video workflow with canonical native evidence and project-local wiki retrieval.",
+  "version": "r3",
+  "description": "Manifest-backed controller-led marketing-video dogfood workflow with canonical native evidence and three owner gates.",
   "allowed_profile": "multi-profile",
-  "cost_band": "high",
+  "cost_band": "medium",
   "side_effects": {
-    "allowed": ["public_read_only_browsing", "read_accepted_wiki_lessons", "local_product_capture", "local_video_render", "local_social_payload_preparation", "kanban_comment", "kanban_complete_or_block"],
-    "forbidden": ["social_publish", "external_message_send", "owner_approval", "credential_exposure", "child_dispatch", "unapproved_wiki_acceptance"]
+    "allowed": [
+      "public_read_only_browsing",
+      "read_accepted_wiki_lessons",
+      "local_product_capture",
+      "local_video_render",
+      "local_social_payload_preparation",
+      "kanban_comment",
+      "kanban_complete_or_block"
+    ],
+    "forbidden": [
+      "social_publish",
+      "external_message_send",
+      "owner_approval",
+      "credential_exposure",
+      "child_dispatch",
+      "unapproved_wiki_acceptance"
+    ]
   },
-  "params": {},
+  "params": {
+    "episode": {
+      "type": "enum",
+      "values": [
+        "EP2",
+        "EP3",
+        "EP4"
+      ],
+      "default": "EP2"
+    }
+  },
   "runtime": {
     "deadline_ms": 7200000,
     "board": "default",
