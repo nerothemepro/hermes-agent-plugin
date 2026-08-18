@@ -88,6 +88,7 @@ function role(profile, runtime, options = {}) {
       live_ack: true,
       cancel_action: runtime.cancel_action,
       deadline_ms: runtime.deadline_ms,
+      preflight_timeout_ms: 30000,
       ...(options.workspace ? { workspace: options.workspace } : {}),
     },
   };
