@@ -36,10 +36,11 @@ else
 fi
 
 CARD_ID="$(node -e 'const s=require(process.argv[1]); const t=s.tasks && s.tasks.episode_render; const id=t && t.external_ids && t.external_ids.hermes_task_id; if (!id) process.exit(2); process.stdout.write(id)' "$PROJECT_PATH/.sdtk/agent-runtime/runs/$RUN_ID/state.json")"
-HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" profile list > "$BACKUP/profile-list.txt"
+HERMES_HOME="$PROFILE_HOME" HERMES_KANBAN_HOME="$PROFILE_HOME" "$HERMES_BIN" profile list > "$BACKUP/profile-list.txt"
 grep -Eq "(^|[[:space:]])hervid([[:space:]]|$)" "$BACKUP/profile-list.txt" || { echo "STOP: hervid is not visible in profile registry" >&2; exit 1; }
-HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" -p hervid --version > "$BACKUP/hervid-version.txt"
-HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" kanban show "$CARD_ID" --json > "$BACKUP/native-card.json"
-HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" kanban dispatch --dry-run --max 1 --json > "$BACKUP/dispatch-dry-run.json"
+HERMES_HOME="$PROFILE_HOME" HERMES_KANBAN_HOME="$PROFILE_HOME" "$HERMES_BIN" -p hervid --version > "$BACKUP/hervid-version.txt"
+HERMES_HOME="$PROFILE_HOME" HERMES_KANBAN_HOME="$PROFILE_HOME" "$HERMES_BIN" kanban show "$CARD_ID" --json > "$BACKUP/native-card.json"
+node -e 'const fs=require("fs"); const card=process.argv[1]; const p=JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const task=p.task || p; if (!task || task.id !== card) { process.stderr.write("STOP: native card lookup returned a different task\n"); process.exit(1); }' "$CARD_ID" "$BACKUP/native-card.json"
+HERMES_HOME="$PROFILE_HOME" HERMES_KANBAN_HOME="$PROFILE_HOME" "$HERMES_BIN" kanban dispatch --dry-run --max 1 --json > "$BACKUP/dispatch-dry-run.json"
 node -e 'const fs=require("fs"); const card=process.argv[1]; const p=JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const blocked=Array.isArray(p.skipped_nonspawnable) ? p.skipped_nonspawnable : []; if (blocked.includes(card)) { process.stderr.write("STOP: Hervid card remains nonspawnable\n"); process.exit(1); }' "$CARD_ID" "$BACKUP/dispatch-dry-run.json"
 printf "EP2_HERVID_PROFILE_ALIAS_OK\n"

@@ -213,19 +213,50 @@ test('capture handoff delivery uses one marker comment and does not duplicate it
 });
 
 
-test('capture handoff copies only hash-verified demo assets into canonical run storage', () => {
-  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-handoff-'));
-  const workspaceRoot = path.join(projectPath, 'worker-workspaces');
-  const workerRoot = path.join(workspaceRoot, 't_capture');
+test('capture handoff fails closed when the canonical manifest omits required terminal output', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-handoff-missing-'));
   const runId = 'run_controller_abc123';
   const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
-  const label = 'DEMO DATA - synthetic fixture only\\n';
-  const table = 'SDTK usage DEMO DATA\\n';
-  fs.mkdirSync(path.join(workerRoot, 'demo_fixture'), { recursive: true });
-  fs.mkdirSync(path.join(runRoot, 'evidence'), { recursive: true });
-  fs.writeFileSync(path.join(workerRoot, 'demo_fixture', 'DEMO_DATA.txt'), label);
-  fs.writeFileSync(path.join(workerRoot, 'capture_table_output.txt'), table);
+  const handoffRoot = path.join(runRoot, 'artifacts', 'product_capture');
+  const label = 'DEMO DATA - synthetic fixture only\n';
+  const hash = require('crypto').createHash('sha256').update(label).digest('hex');
+  fs.mkdirSync(path.join(handoffRoot, 'assets', 'demo_fixture'), { recursive: true });
+  fs.writeFileSync(path.join(handoffRoot, 'assets', 'demo_fixture', 'DEMO_DATA.txt'), label);
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId,
+    tasks: { product_capture: { status: 'completed' }, episode_render: { status: 'ready' } },
+  }));
+  fs.writeFileSync(path.join(runRoot, 'workflow.json'), JSON.stringify({
+    workflow_id: 'hermes_marketing_video_ep2_r3',
+    stages: [{ id: 'episode_render', params: { instruction: 'render' } }],
+  }));
+  fs.writeFileSync(path.join(handoffRoot, 'manifest.json'), JSON.stringify({
+    schema_version: 'hermes.video-dogfood.capture-handoff.v1',
+    run_id: runId,
+    source_task_id: 'product_capture',
+    data_classification: 'demo_only',
+    exit_code: 0,
+    assets: [{ path: 'assets/demo_fixture/DEMO_DATA.txt', sha256: hash, bytes: Buffer.byteLength(label), purpose: 'DEMO DATA label' }],
+  }));
+  try {
+    assert.throws(() => prepareCaptureHandoff(projectPath, runId), /requires terminal table output/);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+test('capture handoff validates worker-written canonical demo assets after scratch is absent', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-handoff-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  const handoffRoot = path.join(runRoot, 'artifacts', 'product_capture');
+  const label = 'DEMO DATA - synthetic fixture only\n';
+  const table = 'SDTK usage DEMO DATA\n';
   const hash = (value) => require('crypto').createHash('sha256').update(value).digest('hex');
+  fs.mkdirSync(path.join(handoffRoot, 'assets', 'demo_fixture'), { recursive: true });
+  fs.writeFileSync(path.join(handoffRoot, 'assets', 'demo_fixture', 'DEMO_DATA.txt'), label);
+  fs.writeFileSync(path.join(handoffRoot, 'assets', 'capture_table_output.txt'), table);
   const state = {
     run_id: runId,
     status: 'running',
@@ -235,33 +266,28 @@ test('capture handoff copies only hash-verified demo assets into canonical run s
     },
   };
   const workflow = { workflow_id: 'hermes_marketing_video_ep2_r3', stages: [{ id: 'episode_render', type: 'task', params: { instruction: 'render from real captures' } }] };
-  const evidence = {
+  const manifest = {
+    schema_version: 'hermes.video-dogfood.capture-handoff.v1',
     run_id: runId,
-    task_id: 'product_capture',
-    fields: { native_metadata: {
-      path: workerRoot,
-      command_run: 'sdtk usage --dir demo_fixture/.claude',
-      exit_code: 0,
-      assets: [
-        { path: 'demo_fixture/DEMO_DATA.txt', sha256: hash(label), purpose: 'DEMO DATA label' },
-        { path: 'capture_table_output.txt', sha256: hash(table), purpose: 'Terminal table output' },
-        { path: 'demo_fixture/.claude/private.jsonl', sha256: '0'.repeat(64), purpose: 'not allowlisted' },
-      ],
-    } },
+    source_task_id: 'product_capture',
+    data_classification: 'demo_only',
+    command_run: 'sdtk usage --dir demo_fixture/.claude',
+    exit_code: 0,
+    assets: [
+      { path: 'assets/demo_fixture/DEMO_DATA.txt', sha256: hash(label), bytes: Buffer.byteLength(label), purpose: 'DEMO DATA label' },
+      { path: 'assets/capture_table_output.txt', sha256: hash(table), bytes: Buffer.byteLength(table), purpose: 'Terminal table output' },
+    ],
   };
   fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify(state));
   fs.writeFileSync(path.join(runRoot, 'workflow.json'), JSON.stringify(workflow));
   fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
-  fs.writeFileSync(path.join(runRoot, 'evidence', 'product_capture.evidence.json'), JSON.stringify(evidence));
+  fs.writeFileSync(path.join(handoffRoot, 'manifest.json'), JSON.stringify(manifest));
   try {
-    const result = prepareCaptureHandoff(projectPath, runId, '2026-08-18T06:00:00.000Z', { workspaceRoot });
-    const manifest = JSON.parse(fs.readFileSync(result.manifest_path, 'utf8'));
+    const result = prepareCaptureHandoff(projectPath, runId, '2026-08-18T06:00:00.000Z');
     const amended = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
-    assert.strictEqual(manifest.data_classification, 'demo_only');
-    assert.strictEqual(manifest.assets.length, 2);
-    assert.ok(fs.existsSync(path.join(runRoot, 'artifacts', 'product_capture', 'assets', 'capture_table_output.txt')));
+    assert.strictEqual(result.reused, false);
+    assert.strictEqual(result.asset_count, 2);
     assert.match(amended.tasks.episode_render.params.instruction, new RegExp(result.manifest_sha256));
-    assert.doesNotMatch(JSON.stringify(manifest), /private\\.jsonl/);
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }

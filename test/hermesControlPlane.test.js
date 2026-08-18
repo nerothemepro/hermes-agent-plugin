@@ -125,6 +125,7 @@ test('EP2 runtime map assigns each native Kanban CLI role its real profile home'
   for (const [role, profile] of Object.entries(expectedProfiles)) {
     assert.strictEqual(preview.runtime_map.roles[role].config.profile, profile);
     assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_HOME, `/opt/data/hermes-profiles/${profile}`);
+    assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_KANBAN_HOME, `/opt/data/hermes-profiles/${profile}`);
     assert.strictEqual(preview.runtime_map.roles[role].config.preflight_timeout_ms, 30000);
   }
 });
