@@ -77,3 +77,8 @@ test('defect loader returns project-local validated defect records', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test('dependency wait is projected as PENDING rather than an unknown blocker', () => {
+  assert.deepStrictEqual(statusProjection('waiting_for_dependency'), { status: 'PENDING', reason: '' });
+});

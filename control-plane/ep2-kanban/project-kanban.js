@@ -49,6 +49,7 @@ function statusProjection(rawStatus) {
   if (ACTIVE_STATUSES.has(status)) return { status: 'IN_PROGRESS', reason: '' };
   if (DONE_STATUSES.has(status)) return { status: 'DONE', reason: '' };
   if (status === 'waiting_for_approval') return { status: 'IN_REVIEW', reason: 'awaiting owner approval' };
+  if (status === 'waiting_for_dependency') return { status: 'PENDING', reason: '' };
   if (['blocked', 'failed', 'cancelled', 'timed_out', 'timeout'].includes(status)) {
     return { status: 'BLOCKED', reason: `ledger status: ${status}` };
   }

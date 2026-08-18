@@ -10,7 +10,18 @@ const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'capture-amend', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'capture-amend', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
+const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
+const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
+const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
+const DEFAULT_HERMES_WORKSPACE_ROOT = '/opt/data/hermes/kanban/workspaces';
+const CAPTURE_HANDOFF_ASSETS = new Set([
+  'demo_fixture/DEMO_DATA.txt',
+  'capture_table_output.txt',
+  'capture_json_output.txt',
+  'evidence_summary.txt',
+  'asset_manifest.txt',
+]);
 
 function requireRunId(value) {
   if (!RUN_ID_PATTERN.test(String(value || ''))) throw new Error('invalid run id');
@@ -81,7 +92,7 @@ function recommendNext(inspection) {
 function parseArgs(argv) {
   let command = argv[0] || '';
   let startIndex = 1;
-  if (command === 'defect' || command === 'capture') {
+  if (command === 'defect' || command === 'capture' || command === 'handoff') {
     command = `${command}-${argv[1] || ''}`;
     startIndex = 2;
   }
@@ -115,8 +126,8 @@ function parseArgs(argv) {
     else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if ((args.command === 'continue' || args.command === 'capture-amend') && !args.confirm) throw new Error(`${args.command} requires --confirm`);
-  if (args.command !== 'continue' && args.command !== 'capture-amend' && args.confirm) throw new Error('--confirm is valid only for continue or capture amend');
+  if ((args.command === 'continue' || args.command === 'capture-amend' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
+  if (args.command !== 'continue' && args.command !== 'capture-amend' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, capture amend, or handoff prepare');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -127,6 +138,8 @@ function parseArgs(argv) {
   } else if (args.command === 'capture-amend') {
     requireRunId(args.runId);
     if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
+  } else if (args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
+    requireRunId(args.runId);
   } else {
     requireRunId(args.runId);
   }
@@ -277,13 +290,178 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
   return amendment;
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  let result;
+
+function requireWorkspacePath(root, value) {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) throw new Error('capture handoff workspace path is invalid');
+  const resolvedRoot = fs.realpathSync(root);
+  const resolved = fs.realpathSync(value);
+  const relative = path.relative(resolvedRoot, resolved);
+  if (relative === '' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+    throw new Error('capture handoff workspace is outside the allowed root');
+  }
+  return resolved;
+}
+
+function verifiedCaptureAsset(sourceRoot, asset) {
+  if (!asset || typeof asset !== 'object' || typeof asset.path !== 'string' || typeof asset.sha256 !== 'string') {
+    throw new Error('capture handoff asset metadata is invalid');
+  }
+  const relative = asset.path.replace(/\\/g, '/');
+  if (!CAPTURE_HANDOFF_ASSETS.has(relative)) return null;
+  if (!/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('capture handoff asset sha256 is invalid');
+  const absolute = path.resolve(sourceRoot, relative);
+  const safeRelative = path.relative(sourceRoot, absolute);
+  if (!safeRelative || safeRelative.startsWith('..' + path.sep) || path.isAbsolute(safeRelative)) throw new Error('capture handoff asset path escapes workspace');
+  const stat = fs.lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('capture handoff asset must be a regular file');
+  const content = fs.readFileSync(absolute);
+  if (sha256(content) !== asset.sha256) throw new Error('capture handoff asset sha256 mismatch: ' + relative);
+  if (/\b(?:api[_-]?key|token|secret|password)\s*[:=]/i.test(content.toString('utf8'))) {
+    throw new Error('capture handoff asset contains a credential-like value: ' + relative);
+  }
+  return { relative, absolute, sha256: asset.sha256, bytes: content.length, purpose: String(asset.purpose || '').slice(0, 160) };
+}
+
+function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(), options = {}) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const capture = state.tasks.product_capture;
+  const render = state.tasks.episode_render;
+  if (!capture || capture.status !== 'completed' || !render || !['ready', 'running_external'].includes(render.status)) {
+    throw new Error('capture handoff requires completed product_capture and an uncompleted episode_render');
+  }
+  const evidencePath = path.join(root, 'evidence', 'product_capture.evidence.json');
+  const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  const metadata = evidence && evidence.fields && evidence.fields.native_metadata;
+  if (!metadata || evidence.run_id !== runId || evidence.task_id !== 'product_capture' || metadata.exit_code !== 0 || !Array.isArray(metadata.assets)) {
+    throw new Error('capture handoff evidence is incomplete');
+  }
+  const workspaceRoot = options.workspaceRoot || DEFAULT_HERMES_WORKSPACE_ROOT;
+  const sourceRoot = requireWorkspacePath(workspaceRoot, metadata.path);
+  const accepted = metadata.assets.map((asset) => verifiedCaptureAsset(sourceRoot, asset)).filter(Boolean);
+  if (!accepted.some((asset) => asset.relative === 'demo_fixture/DEMO_DATA.txt')) throw new Error('capture handoff requires a DEMO DATA label asset');
+  const label = fs.readFileSync(path.join(sourceRoot, 'demo_fixture', 'DEMO_DATA.txt'), 'utf8');
+  if (!/DEMO DATA/.test(label)) throw new Error('capture handoff DEMO DATA label is invalid');
+  if (!accepted.some((asset) => asset.relative === 'capture_table_output.txt')) throw new Error('capture handoff requires terminal table output');
+
+  const handoffRoot = path.join(root, 'artifacts', 'product_capture');
+  const manifestPath = path.join(handoffRoot, 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    return { manifest_path: manifestPath, manifest_sha256: sha256(fs.readFileSync(manifestPath)), asset_count: Array.isArray(manifest.assets) ? manifest.assets.length : 0, reused: true };
+  }
+  fs.mkdirSync(path.dirname(handoffRoot), { recursive: true, mode: 0o700 });
+  const staging = fs.mkdtempSync(path.join(path.dirname(handoffRoot), '.product-capture-'));
+  try {
+    const stagedAssets = [];
+    for (const asset of accepted) {
+      const destination = path.join(staging, 'assets', asset.relative);
+      fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(asset.absolute, destination);
+      fs.chmodSync(destination, 0o600);
+      stagedAssets.push({ path: path.posix.join('assets', asset.relative), sha256: asset.sha256, bytes: asset.bytes, purpose: asset.purpose });
+    }
+    const manifest = {
+      schema_version: 'hermes.video-dogfood.capture-handoff.v1',
+      run_id: runId,
+      source_task_id: 'product_capture',
+      data_classification: 'demo_only',
+      command_run: String(metadata.command_run || ''),
+      exit_code: metadata.exit_code,
+      assets: stagedAssets,
+      prepared_at: now,
+    };
+    fs.writeFileSync(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(staging, handoffRoot);
+  } catch (error) {
+    // Preserve the staging directory for operator inspection; it was never promoted.
+    throw error;
+  }
+  const manifestSha = sha256(fs.readFileSync(manifestPath));
+  const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
+  const workflowPath = path.join(root, 'workflow.json');
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
+  const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'episode_render');
+  if (!stage || !stage.params || workflow.workflow_id !== 'hermes_marketing_video_ep2_r3') throw new Error('capture handoff supports only fixed EP2 R3 render stage');
+  const clause = ' Use only canonical DEMO capture handoff ' + manifestRelative + '; manifest SHA-256: ' + manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
+  const instruction = String(stage.params.instruction || '').replace(/\s+$/, '') + clause;
+  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: manifestRelative, manifest_sha256: manifestSha, data_classification: 'demo_only' } });
+  render.params = Object.assign({}, render.params, stage.params);
+  state.updated_at = now;
+  writeJsonAtomic(workflowPath, workflow);
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_capture_handoff_prepared', { task_id: 'episode_render', manifest_path: manifestRelative, manifest_sha256: manifestSha, asset_count: accepted.length }, now);
+  return { manifest_path: manifestPath, manifest_sha256: manifestSha, asset_count: accepted.length, reused: false };
+}
+
+
+function handoffComment(manifestRelative, manifestSha) {
+  return [
+    HANDOFF_COMMENT_MARKER,
+    'Canonical DEMO capture handoff is ready for this render task.',
+    'manifest: ' + manifestRelative,
+    'sha256: ' + manifestSha,
+    'Verify every listed asset hash before rendering. Do not read the HerDev workspace.',
+  ].join('\n');
+}
+
+function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(), options = {}) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const render = state.tasks.episode_render;
+  const cardId = render && render.external_ids && render.external_ids.hermes_task_id;
+  if (!render || render.status !== 'running_external' || !/^t_[a-z0-9]+$/.test(String(cardId || ''))) {
+    throw new Error('capture handoff delivery requires a submitted EP2 render card');
+  }
+  const manifestPath = path.join(root, 'artifacts', 'product_capture', 'manifest.json');
+  const manifestBytes = fs.readFileSync(manifestPath);
+  const manifest = JSON.parse(manifestBytes);
+  const manifestSha = sha256(manifestBytes);
+  if (manifest.run_id !== runId || manifest.source_task_id !== 'product_capture' || manifest.data_classification !== 'demo_only' || !Array.isArray(manifest.assets)) {
+    throw new Error('capture handoff manifest is invalid');
+  }
+  const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
+  const commandRunner = options.commandRunner || childProcess.spawnSync;
+  const env = Object.assign({}, process.env, { HERMES_HOME: HERVID_PROFILE_HOME });
+  const shown = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
+  if (!shown || shown.status !== 0) throw new Error('capture handoff cannot inspect native render card');
+  let native;
+  try { native = JSON.parse(shown.stdout || '{}'); }
+  catch (_) { throw new Error('capture handoff native render card is invalid JSON'); }
+  const comments = Array.isArray(native.comments) ? native.comments : [];
+  const marker = HANDOFF_COMMENT_MARKER + '\n';
+  if (comments.some((comment) => String(comment.body || comment.text || comment.content || '').includes(marker) && String(comment.body || comment.text || comment.content || '').includes(manifestSha))) {
+    return { task_id: cardId, manifest_path: manifestPath, manifest_sha256: manifestSha, delivered: true, reused: true };
+  }
+  const body = handoffComment(manifestRelative, manifestSha);
+  const commented = commandRunner(HERMES_BIN, ['kanban', 'comment', cardId, body, '--author', 'sdtk-controller'], { encoding: 'utf8', env });
+  if (!commented || commented.status !== 0) throw new Error('capture handoff native comment failed');
+  render.capture_handoff = Object.assign({}, render.capture_handoff, {
+    manifest_path: manifestRelative,
+    manifest_sha256: manifestSha,
+    native_comment_marker: HANDOFF_COMMENT_MARKER,
+    native_comment_delivered_at: now,
+  });
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_capture_handoff_delivered', { task_id: 'episode_render', native_task_id: cardId, manifest_path: manifestRelative, manifest_sha256: manifestSha }, now);
+  return { task_id: cardId, manifest_path: manifestPath, manifest_sha256: manifestSha, delivered: true, reused: false };
+}
+
+function executeCommand(args, dependencies = {}) {
+  const handoffPrepare = dependencies.prepareCaptureHandoff || prepareCaptureHandoff;
+  const handoffDeliver = dependencies.deliverCaptureHandoff || deliverCaptureHandoff;
   if (args.command === 'capture-amend') {
-    result = amendCaptureContract(args.projectPath, args.runId, args.storySha);
-  } else if (args.command === 'defect-record') {
-    result = recordDefect(args.projectPath, {
+    return amendCaptureContract(args.projectPath, args.runId, args.storySha);
+  }
+  if (args.command === 'handoff-prepare') {
+    return handoffPrepare(args.projectPath, args.runId);
+  }
+  if (args.command === 'handoff-deliver') {
+    return handoffDeliver(args.projectPath, args.runId);
+  }
+  if (args.command === 'defect-record') {
+    return recordDefect(args.projectPath, {
       defect_id: args.defectId,
       title: args.title,
       severity: args.severity,
@@ -292,14 +470,19 @@ function main() {
       blocker_class: args.blockerClass,
       next_action: args.nextAction,
     });
-  } else if (args.command === 'defect-close') {
-    result = closeDefect(args.projectPath, args.defectId, args.verification);
-  } else {
-    const inspection = inspectRun(args.projectPath, args.runId);
-    if (args.command === 'inspect') result = inspection;
-    else if (args.command === 'next') result = recommendNext(inspection);
-    else result = { preflight: recommendNext(inspection), execution: runSdtk(args) };
   }
+  if (args.command === 'defect-close') {
+    return closeDefect(args.projectPath, args.defectId, args.verification);
+  }
+  const inspection = inspectRun(args.projectPath, args.runId);
+  if (args.command === 'inspect') return inspection;
+  if (args.command === 'next') return recommendNext(inspection);
+  return { preflight: recommendNext(inspection), execution: runSdtk(args) };
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const result = executeCommand(args);
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   if (result.execution && result.execution.exit_code !== 0) process.exitCode = 1;
 }
@@ -313,4 +496,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { amendCaptureContract, closeDefect, inspectRun, parseArgs, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { amendCaptureContract, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
