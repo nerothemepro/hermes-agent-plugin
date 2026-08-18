@@ -4,7 +4,9 @@
 set -euo pipefail
 
 CONFIG="/opt/data/hermes-profiles/herorches/config.yaml"
-RESTART="/workspace/hermes-agent-plugin/scripts/herprofile_restart.sh"
+STOP="/workspace/hermes-agent-plugin/scripts/herprofile_stop.sh"
+START="/workspace/hermes-agent-plugin/scripts/herprofile_start.sh"
+STATUS="/workspace/hermes-agent-plugin/scripts/herprofile_status.sh"
 BACKUP_ROOT="/opt/data/hermes/control-plane/deploy-backups"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP="$BACKUP_ROOT/ep2-exclusive-control-plane-$STAMP"
@@ -44,5 +46,7 @@ NODE_INNER
 
 grep -Eq '^  home_telegram_chat_env: TELEGRAM_HOME_CHANNEL$' "$CONFIG"
 grep -Eq '^  exclusive_control_plane_mode: true$' "$CONFIG"
-bash "$RESTART" herorches
+bash "$STOP" herorches
+bash "$START" herorches
+bash "$STATUS" herorches
 printf 'EP2_EXCLUSIVE_CONTROL_PLANE_OK\n'
