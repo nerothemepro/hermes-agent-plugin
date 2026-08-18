@@ -41,7 +41,7 @@ function instruction(stage, projectPath, episode) {
     case 'script_package':
       return `Synthesize the English script package for ${identity} from completed evidence and lessons. Required product proof: ${episode.dogfood.product_proof} Include claim ledger, shot list, narration draft, CTA ${episode.dogfood.cta}, and a list of evidence files expected under ${outputRoot}. Do not render, publish, or approve anything. ${shared}`;
     case 'product_capture':
-      return `Create only real, reproducible product-capture evidence for the owner-approved ${identity} script. Required product proof: ${episode.dogfood.product_proof} Produce an asset manifest with paths and SHA-256 values. Do not fabricate UI, render final video, publish, or approve. ${shared}`;
+      return `Create only real, reproducible product-capture evidence for the owner-approved ${identity} script. Required product proof: ${episode.dogfood.product_proof} Use only a dedicated local DEMO DATA fixture visibly labelled DEMO DATA. Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs. If no approved demo fixture is available, block the task before capture. Produce an asset manifest with paths and SHA-256 values. Do not fabricate UI, render final video, publish, or approve. ${shared}`;
     case 'episode_render':
       return `Render the owner-approved ${identity} video from real captures and the approved script package. Run the established sdtk-marketing video-quality checks and record factual pass/fail evidence, output paths, dimensions, duration, audio evidence, and SHA-256. Stop at render/review; do not publish. ${shared}`;
     case 'social_package':

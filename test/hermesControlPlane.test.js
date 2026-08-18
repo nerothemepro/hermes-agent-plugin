@@ -94,6 +94,15 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"episode":"EP5"}', { templateRoot: TEMPLATE_ROOT }), /Invalid episode/);
 });
 
+test('EP2 product capture is constrained to a labelled local demo fixture', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
+  const capture = preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction;
+
+  assert.match(capture, /dedicated local DEMO DATA fixture/);
+  assert.match(capture, /Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs/);
+  assert.match(capture, /If no approved demo fixture is available, block the task before capture/);
+});
+
 test('marketing video dogfood manifest resolves an allowlisted EP3 without freeform instructions', () => {
   const preview = previewTemplate('marketing_video_ep_usage', '{"episode":"EP3"}', { templateRoot: TEMPLATE_ROOT });
   assert.strictEqual(preview.params.episode, 'EP3');
