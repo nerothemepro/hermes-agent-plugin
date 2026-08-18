@@ -3,11 +3,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const childProcess = require('child_process');
+
+const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'capture-amend', 'defect-record', 'defect-close']);
 
 function requireRunId(value) {
   if (!RUN_ID_PATTERN.test(String(value || ''))) throw new Error('invalid run id');
@@ -78,8 +81,8 @@ function recommendNext(inspection) {
 function parseArgs(argv) {
   let command = argv[0] || '';
   let startIndex = 1;
-  if (command === 'defect') {
-    command = `defect-${argv[1] || ''}`;
+  if (command === 'defect' || command === 'capture') {
+    command = `${command}-${argv[1] || ''}`;
     startIndex = 2;
   }
   const args = {
@@ -94,6 +97,7 @@ function parseArgs(argv) {
     blockerClass: '',
     nextAction: '',
     verification: '',
+    storySha: '',
   };
   if (!SUPPORTED_COMMANDS.has(args.command)) throw new Error('unsupported command');
   for (let index = startIndex; index < argv.length; index += 1) {
@@ -108,10 +112,11 @@ function parseArgs(argv) {
     else if (arg === '--blocker-class' && argv[index + 1]) args.blockerClass = argv[++index];
     else if (arg === '--next-action' && argv[index + 1]) args.nextAction = argv[++index];
     else if (arg === '--verification' && argv[index + 1]) args.verification = argv[++index];
+    else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if (args.command === 'continue' && !args.confirm) throw new Error('continue requires --confirm');
-  if (args.command !== 'continue' && args.confirm) throw new Error('--confirm is valid only for continue');
+  if ((args.command === 'continue' || args.command === 'capture-amend') && !args.confirm) throw new Error(`${args.command} requires --confirm`);
+  if (args.command !== 'continue' && args.command !== 'capture-amend' && args.confirm) throw new Error('--confirm is valid only for continue or capture amend');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -119,6 +124,9 @@ function parseArgs(argv) {
     }
   } else if (args.command === 'defect-close') {
     if (!args.defectId || !args.verification) throw new Error('defect close requires verification evidence');
+  } else if (args.command === 'capture-amend') {
+    requireRunId(args.runId);
+    if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
   } else {
     requireRunId(args.runId);
   }
@@ -215,10 +223,66 @@ function closeDefect(projectPath, defectId, verification, now = new Date().toISO
   return defect;
 }
 
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function writeJsonAtomic(filePath, value, mode = 0o600) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const tempPath = filePath + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2) + '\n', { mode });
+  fs.renameSync(tempPath, filePath);
+}
+
+function appendRunEvent(runRoot, runId, type, data, now) {
+  fs.appendFileSync(path.join(runRoot, 'events.ndjson'), JSON.stringify({ ts: now, run_id: runId, type, data }) + '\n', { mode: 0o600 });
+}
+
+function amendCaptureContract(projectPath, runId, storySha, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const workflowPath = path.join(root, 'workflow.json');
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
+  const reviewPath = path.join(root, 'reports', 'script_package.controller-reviewed.md');
+  const review = fs.readFileSync(reviewPath);
+  const storyLock = state.tasks.owner_story_lock;
+  const capture = state.tasks.product_capture;
+  const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'product_capture');
+  if (state.status !== 'blocked' || !capture || capture.status !== 'failed') throw new Error('capture amend requires a blocked run with failed product_capture');
+  if (!storyLock || storyLock.status !== 'completed') throw new Error('capture amend requires completed owner_story_lock');
+  if (workflow.workflow_id !== 'hermes_marketing_video_ep2_r3' || !stage || !stage.params) throw new Error('capture amend supports only the fixed EP2 R3 workflow');
+  if (sha256(review) !== storySha) throw new Error('capture amend Story Lock hash does not match the reviewed artifact');
+  const replacement = buildEp2Workflow(path.resolve(projectPath), 'EP2').stages.find((item) => item.id === 'product_capture').params.instruction;
+  if (!replacement.includes('dedicated local DEMO DATA fixture') || !replacement.includes('If no approved demo fixture is available, block the task before capture.')) {
+    throw new Error('capture amend source contract is not fail-closed');
+  }
+  const oldInstruction = String((capture.params && capture.params.instruction) || '');
+  const amendment = {
+    schema_version: 'hermes.video-dogfood.capture-contract-amendment.v1',
+    run_id: runId,
+    task_id: 'product_capture',
+    approved_story_lock_sha256: storySha,
+    previous_instruction_sha256: sha256(oldInstruction),
+    replacement_instruction_sha256: sha256(replacement),
+    source: 'fixed_ep2_r3_demo_data_capture_contract',
+    amended_at: now,
+  };
+  writeJsonAtomic(path.join(root, 'reports', 'product_capture.contract-amendment.json'), amendment);
+  stage.params.instruction = replacement;
+  capture.params = Object.assign({}, capture.params, { instruction: replacement });
+  state.updated_at = now;
+  writeJsonAtomic(workflowPath, workflow);
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_capture_contract_amended', amendment, now);
+  return amendment;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   let result;
-  if (args.command === 'defect-record') {
+  if (args.command === 'capture-amend') {
+    result = amendCaptureContract(args.projectPath, args.runId, args.storySha);
+  } else if (args.command === 'defect-record') {
     result = recordDefect(args.projectPath, {
       defect_id: args.defectId,
       title: args.title,
@@ -249,4 +313,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { closeDefect, inspectRun, parseArgs, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { amendCaptureContract, closeDefect, inspectRun, parseArgs, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
