@@ -5,6 +5,7 @@ const path = require('path');
 const childProcess = require('child_process');
 
 const { EP2_TEMPLATE_ID } = require('./hermesControlPlaneEp2');
+const { isTerminalRunStatus } = require('./runStatus');
 
 const {
   DEFAULT_PROJECT_PATH,
@@ -22,6 +23,7 @@ function buildRegistryRecord(preview, runId, projectPath) {
     template_id: preview.template_id,
     template_version: preview.template_version,
     template_sha256: preview.template_sha256,
+    template_variant: preview.params?.episode || null,
     ledger_path: runRoot,
     state_path: path.join(runRoot, 'state.json'),
     canonical_report_path: path.join(runRoot, 'reports', 'final_report.md'),
@@ -29,29 +31,41 @@ function buildRegistryRecord(preview, runId, projectPath) {
   };
 }
 
-function findReusableEp2Record(registryDir, projectPath) {
+function findReusableEp2Record(registryDir, projectPath, preview = null) {
   let entries;
   try { entries = fs.readdirSync(registryDir, { withFileTypes: true }); } catch (_) { return null; }
+  const candidates = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
     try {
-      const record = JSON.parse(fs.readFileSync(path.join(registryDir, entry.name), 'utf8'));
+      const recordPath = path.join(registryDir, entry.name);
+      const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'));
       if (record.template_id !== EP2_TEMPLATE_ID || !RUN_ID_PATTERN.test(record.run_id || '')) continue;
+      if (preview && (
+        record.template_version !== preview.template_version ||
+        record.template_sha256 !== preview.template_sha256 ||
+        record.template_variant !== (preview.params?.episode || null)
+      )) continue;
       const expected = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', record.run_id, 'state.json');
       if (path.resolve(record.state_path || '') !== path.resolve(expected)) continue;
       const state = JSON.parse(fs.readFileSync(expected, 'utf8'));
-      if (!['completed', 'failed', 'cancelled'].includes(state.status)) return { record, recordPath: path.join(registryDir, entry.name) };
+      if (!isTerminalRunStatus(state.status)) candidates.push({ record, recordPath, state });
     } catch (_) { /* malformed records never become reusable */ }
   }
-  return null;
+  candidates.sort((a, b) => {
+    const aTime = String(a.state.updated_at || a.record.created_at || '');
+    const bTime = String(b.state.updated_at || b.record.created_at || '');
+    return bTime.localeCompare(aTime) || b.record.run_id.localeCompare(a.record.run_id);
+  });
+  const selected = candidates[0];
+  return selected ? { record: selected.record, recordPath: selected.recordPath } : null;
 }
-
 function prepareTemplate(templateId, rawParams, options = {}) {
   const projectPath = path.resolve(options.projectPath || DEFAULT_PROJECT_PATH);
   const registryDir = path.resolve(options.registryDir || DEFAULT_REGISTRY_DIR);
   const preview = previewTemplate(templateId, rawParams, { ...options, projectPath });
   if (templateId === EP2_TEMPLATE_ID) {
-    const reusable = findReusableEp2Record(registryDir, projectPath);
+    const reusable = findReusableEp2Record(registryDir, projectPath, preview);
     if (reusable) {
       return { status: 'prepared_waiting_for_exact_dispatch_approval', run_id: reusable.record.run_id, registry_path: reusable.recordPath, registry_record: reusable.record, exact_dispatch_approval: `APPROVE DISPATCH ${reusable.record.run_id}`, preview, reused: true };
     }

@@ -3,15 +3,80 @@
   "series_id": "sdtk-build-with-proof-r2",
   "title": "SDTK Build With Proof marketing-video series",
   "episodes": [
-    { "backlog_id": "BK-39901", "episode": "EP1", "title": "Stop Describing UI Bugs to AI", "status": "DONE" },
-    { "backlog_id": "BK-39902", "episode": "EP2", "title": "What Is Your AI Coding Actually Costing?", "status": "IN_PROGRESS" },
-    { "backlog_id": "BK-39903", "episode": "EP3", "title": "From Client Comment to a Precise Patch", "status": "TODO" },
-    { "backlog_id": "BK-39904", "episode": "EP4", "title": "One Requirement, a Reviewable Plan", "status": "TODO" },
-    { "backlog_id": "BK-39905", "episode": "EP5", "title": "Your Markdown Is Already a Kanban Board", "status": "TODO" },
-    { "backlog_id": "BK-39906", "episode": "EP6", "title": "AI Wrote the Patch. The Gate Caught the Problem.", "status": "TODO" },
-    { "backlog_id": "BK-39907", "episode": "EP7", "title": "Your Repo Should Remember Between Agent Sessions", "status": "TODO" },
-    { "backlog_id": "BK-39908", "episode": "EP8", "title": "Build a Local Second Brain for an Agent", "status": "TODO" },
-    { "backlog_id": "BK-39909", "episode": "EP9", "title": "An Agent Workflow That Stops for You", "status": "TODO" },
-    { "backlog_id": "BK-39910", "episode": "EP10", "title": "How This Channel Refuses to Fake Proof", "status": "TODO" }
+    {
+      "backlog_id": "BK-39901",
+      "episode": "EP1",
+      "title": "Stop Describing UI Bugs to AI",
+      "status": "DONE"
+    },
+    {
+      "backlog_id": "BK-39902",
+      "episode": "EP2",
+      "title": "What Is Your AI Coding Actually Costing?",
+      "status": "IN_PROGRESS",
+      "dogfood": {
+        "pain_point": "Solo founders and technical leads cannot reliably see AI coding usage and cost from one factual command.",
+        "product_proof": "Run the real sdtk usage command and show its factual terminal output without inferred savings or unsupported cost claims.",
+        "cta": "https://sdtk.dev/"
+      }
+    },
+    {
+      "backlog_id": "BK-39903",
+      "episode": "EP3",
+      "title": "From Client Comment to a Precise Patch",
+      "status": "TODO",
+      "dogfood": {
+        "pain_point": "Text-only feedback makes it hard for an AI coding agent to locate the exact UI element that needs correction.",
+        "product_proof": "Use the real sdtk-design Preview Studio flow to pin a visual comment, copy the generated prompt, and apply a precise patch.",
+        "cta": "https://sdtk.dev/"
+      }
+    },
+    {
+      "backlog_id": "BK-39904",
+      "episode": "EP4",
+      "title": "One Requirement, a Reviewable Plan",
+      "status": "TODO",
+      "dogfood": {
+        "pain_point": "A raw customer requirement is difficult to turn into a reviewable, traceable implementation plan.",
+        "product_proof": "Use the real sdtk-spec to SDTK-WIKI Kanban to sdtk-code workflow, showing requirement decomposition and attended handoff.",
+        "cta": "https://sdtk.dev/"
+      }
+    },
+    {
+      "backlog_id": "BK-39905",
+      "episode": "EP5",
+      "title": "Your Markdown Is Already a Kanban Board",
+      "status": "TODO"
+    },
+    {
+      "backlog_id": "BK-39906",
+      "episode": "EP6",
+      "title": "AI Wrote the Patch. The Gate Caught the Problem.",
+      "status": "TODO"
+    },
+    {
+      "backlog_id": "BK-39907",
+      "episode": "EP7",
+      "title": "Your Repo Should Remember Between Agent Sessions",
+      "status": "TODO"
+    },
+    {
+      "backlog_id": "BK-39908",
+      "episode": "EP8",
+      "title": "Build a Local Second Brain for an Agent",
+      "status": "TODO"
+    },
+    {
+      "backlog_id": "BK-39909",
+      "episode": "EP9",
+      "title": "An Agent Workflow That Stops for You",
+      "status": "TODO"
+    },
+    {
+      "backlog_id": "BK-39910",
+      "episode": "EP10",
+      "title": "How This Channel Refuses to Fake Proof",
+      "status": "TODO"
+    }
   ]
 }

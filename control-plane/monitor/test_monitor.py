@@ -22,6 +22,8 @@ class MonitorContractTests(unittest.TestCase):
         monitor.project_path = root
         monitor.interval = 10
         monitor.deadline_ratio = 0.75
+        monitor.stale_seconds = 900
+        monitor.toolchain_root = root / "toolchain"
         monitor.token_env = "TEST_TOKEN"
         monitor.chat_env = "TEST_CHAT"
         monitor.dedupe = {}
@@ -87,6 +89,72 @@ class MonitorContractTests(unittest.TestCase):
         monitor = self.make_monitor("completed")
         with self.assertRaises(ValueError):
             monitor._run(["sdtk-agent", "gate", "approve"], "run_test")
+
+
+    def test_stale_external_notification_contains_operator_fields(self):
+        monitor = self.make_monitor("running_external")
+        monitor.bootstrap_path.write_text("ready\n")
+        record = monitor._registry_records()[0]
+        state_path = Path(record["state_path"])
+        old = (datetime.now(timezone.utc) - timedelta(seconds=1200)).isoformat()
+        state_path.write_text(json.dumps({
+            "status": "running",
+            "tasks": {"episode_render": {
+                "status": "running_external", "role": "video", "last_heartbeat": old,
+                "external_ids": {"hermes_task_id": "t_render"},
+            }},
+        }))
+        with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_hermes_task_status", return_value="running"), patch.object(monitor, "_notify") as notify:
+            monitor.tick()
+        texts = [call.args[1] for call in notify.call_args_list]
+        self.assertTrue(any("episode_render" in text and "video" in text and "last heartbeat" in text for text in texts))
+
+    def test_multiple_completed_external_tasks_continue_only_once(self):
+        monitor = self.make_monitor("running_external")
+        monitor.bootstrap_path.write_text("ready\n")
+        record = monitor._registry_records()[0]
+        Path(record["state_path"]).write_text(json.dumps({
+            "status": "running",
+            "tasks": {
+                "research_evidence": {"status": "running_external", "external_ids": {"hermes_task_id": "t_research"}},
+                "episode_lessons": {"status": "running_external", "external_ids": {"hermes_task_id": "t_wiki"}},
+            },
+        }))
+        with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_hermes_task_status", return_value="done"), patch.object(monitor, "_run", return_value={"status": "running"}) as run:
+            observations = monitor.tick()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(observations[1]["action"], "continue")
+
+    def test_monitor_routes_sdtk_through_active_staging_release(self):
+        monitor = self.make_monitor("completed")
+        release = monitor.toolchain_root / "releases" / "release-a"
+        release.mkdir(parents=True)
+        (monitor.toolchain_root / "active-release").write_text("release-a\n")
+        (release / "release.json").write_text(json.dumps({
+            "release_id": "release-a",
+            "packages": {"sdtk-agent-kit": {"version": "0.5.4"}, "sdtk-agent-hermes-adapter": {"version": "0.3.10"}},
+        }))
+        wrapper = monitor.project_path / "control-plane" / "video-dogfood" / "staging" / "with-active-toolchain.sh"
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_text("#!/usr/bin/env bash\n")
+        command = monitor._sdtk_command(["sdtk-agent", "run", "continue"])
+        self.assertEqual(command, [str(wrapper), "sdtk-agent", "run", "continue"])
+
+
+    def test_active_release_identity_contains_versions_only(self):
+        monitor = self.make_monitor("completed")
+        release = monitor.toolchain_root / "releases" / "release-a"
+        release.mkdir(parents=True)
+        (monitor.toolchain_root / "active-release").write_text("release-a\n")
+        (release / "release.json").write_text(json.dumps({
+            "release_id": "release-a",
+            "packages": {"sdtk-agent-kit": {"version": "0.5.4"}, "sdtk-agent-hermes-adapter": {"version": "0.3.10"}},
+        }))
+        self.assertEqual(monitor._active_release(), {
+            "release_id": "release-a",
+            "sdtk_agent": "0.5.4",
+            "hermes_adapter": "0.3.10",
+        })
 
 
 if __name__ == "__main__":

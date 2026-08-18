@@ -75,18 +75,30 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.strictEqual(preview.profile, 'multi-profile');
   assert.deepStrictEqual(preview.profiles, ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial']);
   assert.strictEqual(preview.task_count, 7);
-  assert.strictEqual(preview.gate_count, 5);
+  assert.strictEqual(preview.gate_count, 3);
+  assert.strictEqual(preview.template_version, 'r3');
+  assert.strictEqual(preview.params.episode, 'EP2');
   assert.deepStrictEqual(preview.workflow.stages.filter((stage) => stage.type === 'task').map((stage) => stage.id), [
     'research_evidence', 'episode_lessons', 'script_package', 'product_capture', 'episode_render', 'social_package', 'lessons_record',
   ]);
   assert.deepStrictEqual(preview.workflow.stages.filter((stage) => stage.type === 'human_gate').map((stage) => stage.id), [
-    'owner_script_review', 'owner_assets_review', 'owner_picture_lock', 'owner_social_review', 'owner_lessons_review',
+    'owner_story_lock', 'owner_picture_lock', 'owner_publish_approval',
   ]);
   assert.deepStrictEqual(Object.keys(preview.runtime_map.roles).sort(), ['developer', 'orchestrator', 'researcher', 'social', 'video', 'wiki']);
   assert.strictEqual(preview.runtime_map.roles.video.config.profile, 'hervid');
   assert.strictEqual(preview.runtime_map.roles.wiki.config.workspace, 'project_path');
   assert.match(preview.workflow.stages.find((stage) => stage.id === 'episode_lessons').params.instruction, /project-local SDTK-WIKI/);
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
+  assert.strictEqual(preview.cost_band, 'medium');
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /What Is Your AI Coding Actually Costing/);
+  assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"episode":"EP5"}', { templateRoot: TEMPLATE_ROOT }), /Invalid episode/);
+});
+
+test('marketing video dogfood manifest resolves an allowlisted EP3 without freeform instructions', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', '{"episode":"EP3"}', { templateRoot: TEMPLATE_ROOT });
+  assert.strictEqual(preview.params.episode, 'EP3');
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /From Client Comment to a Precise Patch/);
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction, /Preview Studio/);
 });
 
 test('EP2 runtime map assigns each native Kanban CLI role its real profile home', () => {

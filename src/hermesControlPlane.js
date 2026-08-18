@@ -124,7 +124,7 @@ function renderInstruction(templateId, params, projectPath) {
 
 function buildWorkflow(template, params, options = {}) {
   if (template.template_id === EP2_TEMPLATE_ID) {
-    return buildEp2Workflow(path.resolve(options.projectPath || DEFAULT_PROJECT_PATH));
+    return buildEp2Workflow(path.resolve(options.projectPath || DEFAULT_PROJECT_PATH), params.episode, options);
   }
   const projectPath = path.resolve(options.projectPath || DEFAULT_PROJECT_PATH);
   const instruction = renderInstruction(template.template_id, params, projectPath);

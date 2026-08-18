@@ -33,6 +33,8 @@ class Monitor:
         self.project_path = Path(os.environ.get("SDTK_PROJECT_PATH", "/workspace/hermes-agent-plugin"))
         self.interval = max(1, int(os.environ.get("HERMES_MONITOR_INTERVAL_SECONDS", "10")))
         self.deadline_ratio = float(os.environ.get("HERMES_MONITOR_DEADLINE_RATIO", "0.75"))
+        self.stale_seconds = max(60, int(os.environ.get("HERMES_MONITOR_STALE_SECONDS", "900")))
+        self.toolchain_root = Path(os.environ.get("SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT", "/opt/data/hermes/control-plane/video-dogfood/toolchain"))
         self.token_env = os.environ.get("HERMES_CONTROL_PLANE_BOT_TOKEN_ENV", "TELEGRAM_BOT_TOKEN")
         self.chat_env = os.environ.get("HERMES_CONTROL_PLANE_NOTIFY_CHAT_ENV", "TELEGRAM_HOME_CHANNEL")
         self.dedupe = self._load_json(self.dedupe_path, {})
@@ -59,11 +61,17 @@ class Monitor:
         os.chmod(temp, 0o600)
         temp.replace(path)
 
+    def _sdtk_command(self, args: list[str]) -> list[str]:
+        wrapper = self.project_path / "control-plane" / "video-dogfood" / "staging" / "with-active-toolchain.sh"
+        if self._active_release() and wrapper.is_file():
+            return [str(wrapper), *args]
+        return args
+
     def _run(self, args: list[str], run_id: str) -> dict:
         if tuple(args) not in ALLOWED_ACTIONS:
             raise ValueError("monitor attempted a non-allowlisted SDTK command")
         result = subprocess.run(
-            [*args, "--project-path", str(self.project_path), "--run-id", run_id, "--json"],
+            [*self._sdtk_command(args), "--project-path", str(self.project_path), "--run-id", run_id, "--json"],
             check=False,
             capture_output=True,
             text=True,
@@ -129,6 +137,32 @@ class Monitor:
         )
         return result.returncode == 0 and "Gateway is running" in result.stdout
 
+    def _active_release(self) -> dict | None:
+        pointer = self.toolchain_root / "active-release"
+        try:
+            release_id = pointer.read_text(encoding="utf-8").strip()
+            if not release_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in release_id):
+                return None
+            manifest = self._load_json(self.toolchain_root / "releases" / release_id / "release.json", None)
+            packages = manifest.get("packages", {}) if isinstance(manifest, dict) else {}
+            return {
+                "release_id": release_id,
+                "sdtk_agent": packages.get("sdtk-agent-kit", {}).get("version"),
+                "hermes_adapter": packages.get("sdtk-agent-hermes-adapter", {}).get("version"),
+            }
+        except OSError:
+            return None
+
+    def _task_stale(self, task: dict) -> bool:
+        value = task.get("last_heartbeat") or task.get("updated_at") or task.get("submitted_at")
+        if not value:
+            return False
+        try:
+            observed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return (datetime.now(timezone.utc) - observed).total_seconds() >= self.stale_seconds
+
     def _infrastructure_checks(self) -> dict:
         baseline = self._load_json(self.zombie_baseline_path, {"count": 0})
         zombies = self._zombie_count()
@@ -137,7 +171,7 @@ class Monitor:
             self._notify("dispatcher_down", "Hermes dispatcher gateway is unavailable\nprofile: herorches\nrecovery: inspect gateway log, then use the approved gateway restart runbook.")
         if zombies > int(baseline.get("count", 0)):
             self._notify("zombie_baseline_exceeded", f"Hermes zombie count increased\nbaseline: {baseline.get('count', 0)}\ncurrent: {zombies}\nrecovery: stop dispatch and inspect supervisor/gateway logs.")
-        return {"dispatcher_healthy": dispatcher_ok, "zombie_count": zombies, "zombie_baseline": baseline.get("count", 0)}
+        return {"dispatcher_healthy": dispatcher_ok, "zombie_count": zombies, "zombie_baseline": baseline.get("count", 0), "active_release": self._active_release()}
 
     @staticmethod
     def _deadline_risk(task: dict, ratio: float, interval: int) -> bool:
@@ -178,33 +212,60 @@ class Monitor:
             run_id = record["run_id"]
             state = self._state(record)
             run_status = state.get("status") or state.get("run_status")
-            waiting_task_id = state.get("waiting_task_id")
             tasks = state.get("tasks", {})
+            waiting_task_id = state.get("waiting_task_id")
             waiting_task = tasks.get(waiting_task_id, {}) if waiting_task_id else {}
-            if run_status == "running" and not waiting_task:
-                active = [(task_id, task) for task_id, task in tasks.items() if task.get("status") == "running_external"]
-                if len(active) == 1:
-                    waiting_task_id, waiting_task = active[0]
-            status = waiting_task.get("status") if run_status == "running" and waiting_task else run_status
+            active = [
+                (task_id, task) for task_id, task in tasks.items()
+                if task.get("status") == "running_external"
+            ]
+            if run_status == "running" and active:
+                status = "running_external"
+            elif run_status == "running" and waiting_task:
+                status = waiting_task.get("status")
+            else:
+                status = run_status
             status_changed = self._is_new_status(run_id, status)
-            observation = {"run_id": run_id, "status": status, "action": "none"}
+            observation = {
+                "run_id": run_id,
+                "status": status,
+                "action": "none",
+                "active_task_ids": [task_id for task_id, _ in active],
+            }
             if bootstrap:
                 observation["action"] = "baseline_only"
             elif status == "running_external":
-                task = waiting_task
-                task_id = task.get("external_ids", {}).get("hermes_task_id")
-                external_status = self._hermes_task_status(task_id) if task_id else None
-                observation["external_status"] = external_status
-                if self._deadline_risk(task, self.deadline_ratio, self.interval):
-                    self._notify(f"{run_id}:deadline_risk", f"SDTK external deadline risk\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect worker progress; do not retry automatically.")
-                if external_status in (None, "ready"):
-                    self._notify(f"{run_id}:external_unclaimed", f"SDTK external task is not actively claimed\nrun_id: {run_id}\ntask_id: {task_id or waiting_task_id}\nrecovery: inspect dispatcher and board queue; do not create a duplicate task.")
-                if external_status in ("done", "blocked", "failed"):
+                terminal_external = False
+                external_states = {}
+                for task_id, task in active:
+                    hermes_task_id = task.get("external_ids", {}).get("hermes_task_id")
+                    external_status = self._hermes_task_status(hermes_task_id) if hermes_task_id else None
+                    external_states[task_id] = external_status
+                    if self._deadline_risk(task, self.deadline_ratio, self.interval):
+                        self._notify(
+                            f"{run_id}:{task_id}:deadline_risk",
+                            f"SDTK external deadline risk\nrun_id: {run_id}\ntask_id: {task_id}\nworker: {task.get('role') or 'unknown'}\nrecovery: inspect worker progress; do not retry automatically.",
+                        )
+                    if self._task_stale(task):
+                        heartbeat = task.get("last_heartbeat") or task.get("updated_at") or task.get("submitted_at") or "not recorded"
+                        self._notify(
+                            f"{run_id}:{task_id}:stale",
+                            f"SDTK external task is stale\nrun_id: {run_id}\ntask_id: {task_id}\nworker: {task.get('role') or 'unknown'}\nlast heartbeat: {heartbeat}\nblocker_class: RECOVERABLE_RUNTIME\nnext action: inspect native card; do not create a duplicate.",
+                        )
+                    if external_status in (None, "ready"):
+                        self._notify(
+                            f"{run_id}:{task_id}:external_unclaimed",
+                            f"SDTK external task is not actively claimed\nrun_id: {run_id}\ntask_id: {hermes_task_id or task_id}\nworker: {task.get('role') or 'unknown'}\nrecovery: inspect dispatcher and board queue; do not create a duplicate task.",
+                        )
+                    if external_status in ("done", "blocked", "failed"):
+                        terminal_external = True
+                observation["external_states"] = external_states
+                if terminal_external:
                     continued = self._run(["sdtk-agent", "run", "continue"], run_id)
                     observation["action"] = "continue"
                     observation["continue_status"] = continued.get("status")
             elif status == "waiting_for_approval" and status_changed:
-                gate = state.get("waiting_gate") or state.get("gate") or "owner_review"
+                gate = state.get("waiting_gate_id") or state.get("waiting_gate") or state.get("gate") or "owner_review"
                 self._notify(
                     f"{run_id}:waiting_for_approval:{gate}",
                     f"SDTK run waiting for approval\nrun_id: {run_id}\ngate: {gate}\nAPPROVE GATE {run_id} {gate}",
