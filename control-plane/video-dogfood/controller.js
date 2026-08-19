@@ -14,7 +14,6 @@ const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
-const DEFAULT_HERMES_WORKSPACE_ROOT = '/opt/data/hermes/kanban/workspaces';
 const CAPTURE_HANDOFF_ASSETS = new Set([
   'demo_fixture/DEMO_DATA.txt',
   'capture_table_output.txt',
@@ -291,38 +290,55 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
 }
 
 
-function requireWorkspacePath(root, value) {
-  if (typeof value !== 'string' || !path.isAbsolute(value)) throw new Error('capture handoff workspace path is invalid');
-  const resolvedRoot = fs.realpathSync(root);
-  const resolved = fs.realpathSync(value);
-  const relative = path.relative(resolvedRoot, resolved);
-  if (relative === '' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
-    throw new Error('capture handoff workspace is outside the allowed root');
-  }
-  return resolved;
-}
-
-function verifiedCaptureAsset(sourceRoot, asset) {
+function verifiedCanonicalCaptureAsset(handoffRoot, asset) {
   if (!asset || typeof asset !== 'object' || typeof asset.path !== 'string' || typeof asset.sha256 !== 'string') {
     throw new Error('capture handoff asset metadata is invalid');
   }
   const relative = asset.path.replace(/\\/g, '/');
-  if (!CAPTURE_HANDOFF_ASSETS.has(relative)) return null;
+  if (!relative.startsWith('assets/')) throw new Error('capture handoff asset is outside canonical assets');
+  const logicalPath = relative.slice('assets/'.length);
+  if (!CAPTURE_HANDOFF_ASSETS.has(logicalPath)) throw new Error('capture handoff asset is not allowlisted: ' + logicalPath);
   if (!/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('capture handoff asset sha256 is invalid');
-  const absolute = path.resolve(sourceRoot, relative);
-  const safeRelative = path.relative(sourceRoot, absolute);
-  if (!safeRelative || safeRelative.startsWith('..' + path.sep) || path.isAbsolute(safeRelative)) throw new Error('capture handoff asset path escapes workspace');
+  const absolute = path.resolve(handoffRoot, relative);
+  const safeRelative = path.relative(handoffRoot, absolute);
+  if (!safeRelative || safeRelative.startsWith('..' + path.sep) || path.isAbsolute(safeRelative)) throw new Error('capture handoff asset path escapes canonical storage');
   const stat = fs.lstatSync(absolute);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('capture handoff asset must be a regular file');
   const content = fs.readFileSync(absolute);
   if (sha256(content) !== asset.sha256) throw new Error('capture handoff asset sha256 mismatch: ' + relative);
+  if (Number.isInteger(asset.bytes) && asset.bytes !== content.length) throw new Error('capture handoff asset byte count mismatch: ' + relative);
   if (/\b(?:api[_-]?key|token|secret|password)\s*[:=]/i.test(content.toString('utf8'))) {
     throw new Error('capture handoff asset contains a credential-like value: ' + relative);
   }
   return { relative, absolute, sha256: asset.sha256, bytes: content.length, purpose: String(asset.purpose || '').slice(0, 160) };
 }
 
-function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(), options = {}) {
+function readCanonicalCaptureManifest(root, runId) {
+  const handoffRoot = path.join(root, 'artifacts', 'product_capture');
+  const manifestPath = path.join(handoffRoot, 'manifest.json');
+  let bytes;
+  let manifest;
+  try {
+    bytes = fs.readFileSync(manifestPath);
+    manifest = JSON.parse(bytes);
+  } catch (_) {
+    throw new Error('capture handoff canonical manifest is unavailable');
+  }
+  if (!manifest || manifest.schema_version !== 'hermes.video-dogfood.capture-handoff.v1'
+    || manifest.run_id !== runId || manifest.source_task_id !== 'product_capture'
+    || manifest.data_classification !== 'demo_only' || manifest.exit_code !== 0
+    || !Array.isArray(manifest.assets) || manifest.assets.length === 0) {
+    throw new Error('capture handoff canonical manifest is invalid');
+  }
+  const accepted = manifest.assets.map((asset) => verifiedCanonicalCaptureAsset(handoffRoot, asset));
+  const label = accepted.find((asset) => asset.relative === 'assets/demo_fixture/DEMO_DATA.txt');
+  if (!label) throw new Error('capture handoff requires a DEMO DATA label asset');
+  if (!/DEMO DATA/.test(fs.readFileSync(label.absolute, 'utf8'))) throw new Error('capture handoff DEMO DATA label is invalid');
+  if (!accepted.some((asset) => asset.relative === 'assets/capture_table_output.txt')) throw new Error('capture handoff requires terminal table output');
+  return { handoffRoot, manifestPath, manifest, manifestSha: sha256(bytes), assets: accepted };
+}
+
+function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString()) {
   const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
   const state = readState(projectPath, runId);
   const capture = state.tasks.product_capture;
@@ -330,70 +346,25 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (!capture || capture.status !== 'completed' || !render || !['ready', 'running_external'].includes(render.status)) {
     throw new Error('capture handoff requires completed product_capture and an uncompleted episode_render');
   }
-  const evidencePath = path.join(root, 'evidence', 'product_capture.evidence.json');
-  const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
-  const metadata = evidence && evidence.fields && evidence.fields.native_metadata;
-  if (!metadata || evidence.run_id !== runId || evidence.task_id !== 'product_capture' || metadata.exit_code !== 0 || !Array.isArray(metadata.assets)) {
-    throw new Error('capture handoff evidence is incomplete');
-  }
-  const workspaceRoot = options.workspaceRoot || DEFAULT_HERMES_WORKSPACE_ROOT;
-  const sourceRoot = requireWorkspacePath(workspaceRoot, metadata.path);
-  const accepted = metadata.assets.map((asset) => verifiedCaptureAsset(sourceRoot, asset)).filter(Boolean);
-  if (!accepted.some((asset) => asset.relative === 'demo_fixture/DEMO_DATA.txt')) throw new Error('capture handoff requires a DEMO DATA label asset');
-  const label = fs.readFileSync(path.join(sourceRoot, 'demo_fixture', 'DEMO_DATA.txt'), 'utf8');
-  if (!/DEMO DATA/.test(label)) throw new Error('capture handoff DEMO DATA label is invalid');
-  if (!accepted.some((asset) => asset.relative === 'capture_table_output.txt')) throw new Error('capture handoff requires terminal table output');
-
-  const handoffRoot = path.join(root, 'artifacts', 'product_capture');
-  const manifestPath = path.join(handoffRoot, 'manifest.json');
-  if (fs.existsSync(manifestPath)) {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    return { manifest_path: manifestPath, manifest_sha256: sha256(fs.readFileSync(manifestPath)), asset_count: Array.isArray(manifest.assets) ? manifest.assets.length : 0, reused: true };
-  }
-  fs.mkdirSync(path.dirname(handoffRoot), { recursive: true, mode: 0o700 });
-  const staging = fs.mkdtempSync(path.join(path.dirname(handoffRoot), '.product-capture-'));
-  try {
-    const stagedAssets = [];
-    for (const asset of accepted) {
-      const destination = path.join(staging, 'assets', asset.relative);
-      fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-      fs.copyFileSync(asset.absolute, destination);
-      fs.chmodSync(destination, 0o600);
-      stagedAssets.push({ path: path.posix.join('assets', asset.relative), sha256: asset.sha256, bytes: asset.bytes, purpose: asset.purpose });
-    }
-    const manifest = {
-      schema_version: 'hermes.video-dogfood.capture-handoff.v1',
-      run_id: runId,
-      source_task_id: 'product_capture',
-      data_classification: 'demo_only',
-      command_run: String(metadata.command_run || ''),
-      exit_code: metadata.exit_code,
-      assets: stagedAssets,
-      prepared_at: now,
-    };
-    fs.writeFileSync(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
-    fs.renameSync(staging, handoffRoot);
-  } catch (error) {
-    // Preserve the staging directory for operator inspection; it was never promoted.
-    throw error;
-  }
-  const manifestSha = sha256(fs.readFileSync(manifestPath));
-  const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
+  const canonical = readCanonicalCaptureManifest(root, runId);
+  const manifestRelative = path.relative(root, canonical.manifestPath).split(path.sep).join('/');
   const workflowPath = path.join(root, 'workflow.json');
   const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
   const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'episode_render');
   if (!stage || !stage.params || workflow.workflow_id !== 'hermes_marketing_video_ep2_r3') throw new Error('capture handoff supports only fixed EP2 R3 render stage');
-  const clause = ' Use only canonical DEMO capture handoff ' + manifestRelative + '; manifest SHA-256: ' + manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
+  if (stage.params.capture_handoff && stage.params.capture_handoff.manifest_sha256 === canonical.manifestSha) {
+    return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: true };
+  }
+  const clause = ' Use only canonical DEMO capture handoff ' + manifestRelative + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
   const instruction = String(stage.params.instruction || '').replace(/\s+$/, '') + clause;
-  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: manifestRelative, manifest_sha256: manifestSha, data_classification: 'demo_only' } });
+  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' } });
   render.params = Object.assign({}, render.params, stage.params);
   state.updated_at = now;
   writeJsonAtomic(workflowPath, workflow);
   writeJsonAtomic(statePath(projectPath, runId), state);
-  appendRunEvent(root, runId, 'controller_capture_handoff_prepared', { task_id: 'episode_render', manifest_path: manifestRelative, manifest_sha256: manifestSha, asset_count: accepted.length }, now);
-  return { manifest_path: manifestPath, manifest_sha256: manifestSha, asset_count: accepted.length, reused: false };
+  appendRunEvent(root, runId, 'controller_capture_handoff_prepared', { task_id: 'episode_render', manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length }, now);
+  return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: false };
 }
-
 
 function handoffComment(manifestRelative, manifestSha) {
   return [
@@ -422,7 +393,7 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   }
   const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
   const commandRunner = options.commandRunner || childProcess.spawnSync;
-  const env = Object.assign({}, process.env, { HERMES_HOME: HERVID_PROFILE_HOME });
+  const env = Object.assign({}, process.env, { HERMES_HOME: HERVID_PROFILE_HOME, HERMES_KANBAN_HOME: HERVID_PROFILE_HOME });
   const shown = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
   if (!shown || shown.status !== 0) throw new Error('capture handoff cannot inspect native render card');
   let native;
