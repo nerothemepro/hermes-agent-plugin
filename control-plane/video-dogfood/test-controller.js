@@ -18,6 +18,7 @@ const {
   parseArgs,
   recommendNext,
   recordDefect,
+  verifyRenderOutput,
 } = require('./controller');
 
 function fixture(state) {
@@ -81,6 +82,9 @@ test('continue requires explicit confirm and unsupported mutation verbs are reje
   assert.throws(() => parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123']), /requires --confirm/);
   const accepted = parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(accepted.command, 'capture-accept');
+  assert.throws(() => parseArgs(['render', 'verify', '--run-id', 'run_controller_abc123']), /requires --confirm/);
+  const renderVerified = parseArgs(['render', 'verify', '--run-id', 'run_controller_abc123', '--confirm']);
+  assert.strictEqual(renderVerified.command, 'render-verify');
   assert.throws(() => parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123']), /requires --confirm/);
   const handoff = parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(handoff.command, 'handoff-prepare');
@@ -312,6 +316,34 @@ test('capture accept completes only a ready EP2 demo fixture with hash-pinned su
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }
+});
+
+test('render verification rejects a no-op completion before owner picture lock', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-render-verify-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  fs.mkdirSync(path.join(runRoot, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'waiting_for_approval', waiting_gate_id: 'owner_picture_lock', tasks: {
+      episode_render: { id: 'episode_render', type: 'task', status: 'completed', params: { render_output: {
+        video_path: path.join(runRoot, 'artifacts', 'episode_render', 'episode.mp4'),
+        quality_report_path: path.join(runRoot, 'reports', 'episode_render.quality.json'),
+      } } },
+      owner_picture_lock: { id: 'owner_picture_lock', type: 'human_gate', status: 'waiting_for_approval' },
+      social_package: { id: 'social_package', type: 'task', status: 'waiting_for_dependency', depends_on: ['owner_picture_lock'] },
+    },
+  }));
+  try {
+    const result = verifyRenderOutput(projectPath, runId, '2026-08-20T14:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    assert.strictEqual(result.valid, false);
+    assert.match(result.reason, /rendered MP4 is missing/);
+    assert.strictEqual(state.status, 'blocked');
+    assert.strictEqual(state.tasks.episode_render.status, 'failed');
+    assert.strictEqual(state.tasks.owner_picture_lock.status, 'blocked');
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_render_output_rejected/);
+  } finally { fs.rmSync(projectPath, { recursive: true, force: true }); }
 });
 
 test('capture handoff delivery uses one marker comment and does not duplicate it', () => {

@@ -10,7 +10,7 @@ const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'capture-accept', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'capture-accept', 'render-verify', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
@@ -68,6 +68,9 @@ function inspectRun(projectPath, runId) {
 
 function recommendNext(inspection) {
   if (inspection.owner_gate) {
+    if (inspection.owner_gate === 'owner_picture_lock') {
+      return { action: 'render_output_verification_required', task_id: 'episode_render', mutates_state: false };
+    }
     return { action: 'owner_approval_required', gate_id: inspection.owner_gate, mutates_state: false };
   }
   if (['blocked', 'cancelled', 'completed', 'failed'].includes(inspection.status)) {
@@ -91,7 +94,7 @@ function recommendNext(inspection) {
 function parseArgs(argv) {
   let command = argv[0] || '';
   let startIndex = 1;
-  if (command === 'defect' || command === 'story' || command === 'capture' || command === 'handoff') {
+  if (command === 'defect' || command === 'story' || command === 'capture' || command === 'render' || command === 'handoff') {
     command = `${command}-${argv[1] || ''}`;
     startIndex = 2;
   }
@@ -125,8 +128,8 @@ function parseArgs(argv) {
     else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'capture-accept' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
-  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'capture-accept' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, capture accept, or handoff operations');
+  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'capture-accept' || args.command === 'render-verify' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
+  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'capture-accept' && args.command !== 'render-verify' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, capture accept, render verify, or handoff operations');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -140,7 +143,7 @@ function parseArgs(argv) {
   } else if (args.command === 'capture-amend') {
     requireRunId(args.runId);
     if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
-  } else if (args.command === 'capture-accept' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
+  } else if (args.command === 'capture-accept' || args.command === 'render-verify' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
     requireRunId(args.runId);
   } else {
     requireRunId(args.runId);
@@ -511,6 +514,10 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   }
   const canonical = readCanonicalCaptureManifest(root, runId);
   const manifestRelative = path.relative(root, canonical.manifestPath).split(path.sep).join('/');
+  const renderOutput = {
+    video_path: path.join(root, 'artifacts', 'episode_render', 'episode.mp4'),
+    quality_report_path: path.join(root, 'reports', 'episode_render.quality.json'),
+  };
   const workflowPath = path.join(root, 'workflow.json');
   const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
   const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'episode_render');
@@ -518,15 +525,88 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (stage.params.capture_handoff && stage.params.capture_handoff.manifest_sha256 === canonical.manifestSha) {
     return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: true };
   }
-  const clause = ' Use only canonical DEMO capture handoff ' + canonical.manifestPath + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
+  const clause = ' Use only canonical DEMO capture handoff ' + canonical.manifestPath + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace. Write the rendered MP4 only to ' + renderOutput.video_path + ' and the factual quality report only to ' + renderOutput.quality_report_path + '. Do not complete this task without both files.';
   const instruction = String(stage.params.instruction || '').replace(/\s+$/, '') + clause;
-  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' } });
+  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' }, render_output: renderOutput });
   render.params = Object.assign({}, render.params, stage.params);
   state.updated_at = now;
   writeJsonAtomic(workflowPath, workflow);
   writeJsonAtomic(statePath(projectPath, runId), state);
   appendRunEvent(root, runId, 'controller_capture_handoff_prepared', { task_id: 'episode_render', manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length }, now);
   return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: false };
+}
+
+function markRenderVerificationFailure(projectPath, runId, state, reason, now) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId);
+  const render = state.tasks.episode_render;
+  const pictureLock = state.tasks.owner_picture_lock;
+  render.status = 'failed';
+  render.failed_at = now;
+  render.blocked_reason = reason;
+  render.last_error = reason;
+  render.last_errors = (Array.isArray(render.last_errors) ? render.last_errors : []).concat([{ code: 'HERMES_RENDER_OUTPUT_INVALID', detail: reason }]);
+  if (pictureLock && pictureLock.status === 'waiting_for_approval') {
+    pictureLock.status = 'blocked';
+    pictureLock.blocked_by = 'episode_render';
+    pictureLock.blocked_reason = reason;
+  }
+  for (const task of Object.values(state.tasks)) {
+    if (task && task.status === 'waiting_for_dependency') {
+      task.status = 'blocked';
+      task.blocked_by = task.depends_on && task.depends_on[0] || 'episode_render';
+    }
+  }
+  state.status = 'blocked';
+  state.waiting_gate_id = null;
+  state.waiting_task_id = null;
+  state.blocker = 'episode_render: ' + reason;
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_render_output_rejected', { task_id: 'episode_render', reason }, now);
+  return { valid: false, task_id: 'episode_render', reason };
+}
+
+function verifyRenderOutput(projectPath, runId, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const render = state.tasks.episode_render;
+  const pictureLock = state.tasks.owner_picture_lock;
+  if (state.status !== 'waiting_for_approval' || !render || render.status !== 'completed'
+    || !pictureLock || pictureLock.status !== 'waiting_for_approval') {
+    throw new Error('render verify requires completed episode_render awaiting owner_picture_lock');
+  }
+  const output = render.params && render.params.render_output;
+  const expectedVideo = path.join(root, 'artifacts', 'episode_render', 'episode.mp4');
+  const expectedReport = path.join(root, 'reports', 'episode_render.quality.json');
+  if (!output || output.video_path !== expectedVideo || output.quality_report_path !== expectedReport) {
+    return markRenderVerificationFailure(projectPath, runId, state, 'canonical render output contract is missing', now);
+  }
+  let videoBytes;
+  let report;
+  try {
+    if (!fs.existsSync(expectedVideo)) throw new Error('rendered MP4 is missing or too small');
+    const videoStat = fs.lstatSync(expectedVideo);
+    if (!videoStat.isFile() || videoStat.isSymbolicLink() || videoStat.size < 65536) throw new Error('rendered MP4 is missing or too small');
+    videoBytes = fs.readFileSync(expectedVideo);
+    if (!fs.existsSync(expectedReport)) throw new Error('quality report is missing');
+    const reportStat = fs.lstatSync(expectedReport);
+    if (!reportStat.isFile() || reportStat.isSymbolicLink()) throw new Error('quality report is missing');
+    report = JSON.parse(fs.readFileSync(expectedReport, 'utf8'));
+  } catch (error) {
+    return markRenderVerificationFailure(projectPath, runId, state, error.message, now);
+  }
+  const videoSha = sha256(videoBytes);
+  if (!report || report.run_id !== runId || report.task_id !== 'episode_render'
+    || report.video_path !== expectedVideo || report.video_sha256 !== videoSha
+    || report.quality_status !== 'pass') {
+    return markRenderVerificationFailure(projectPath, runId, state, 'quality report does not attest the canonical rendered MP4', now);
+  }
+  const verification = { task_id: 'episode_render', video_path: expectedVideo, video_sha256: videoSha, quality_report_path: expectedReport, verified_at: now };
+  writeJsonAtomic(path.join(root, 'reports', 'episode_render.controller-verified.json'), verification);
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_render_output_verified', verification, now);
+  return Object.assign({ valid: true }, verification);
 }
 
 function handoffComment(manifestRelative, manifestSha) {
@@ -594,6 +674,7 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
 
 function executeCommand(args, dependencies = {}) {
   const captureAccept = dependencies.acceptDeterministicCapture || acceptDeterministicCapture;
+  const renderVerify = dependencies.verifyRenderOutput || verifyRenderOutput;
   const handoffPrepare = dependencies.prepareCaptureHandoff || prepareCaptureHandoff;
   const handoffDeliver = dependencies.deliverCaptureHandoff || deliverCaptureHandoff;
   if (args.command === 'story-bind') {
@@ -604,6 +685,9 @@ function executeCommand(args, dependencies = {}) {
   }
   if (args.command === 'capture-accept') {
     return captureAccept(args.projectPath, args.runId);
+  }
+  if (args.command === 'render-verify') {
+    return renderVerify(args.projectPath, args.runId);
   }
   if (args.command === 'handoff-prepare') {
     return handoffPrepare(args.projectPath, args.runId);
@@ -647,4 +731,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { acceptDeterministicCapture, amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { acceptDeterministicCapture, amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, markRenderVerificationFailure, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk, verifyRenderOutput };
