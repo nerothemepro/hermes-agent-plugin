@@ -172,6 +172,11 @@ test('capture amendment replaces only failed EP2 capture instruction with audite
     const amendedStage = amendedWorkflow.stages.find((stage) => stage.id === 'product_capture');
     assert.strictEqual(result.task_id, 'product_capture');
     assert.match(amendedState.tasks.product_capture.params.instruction, /dedicated local DEMO DATA fixture/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Compact retry contract/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Do not read repository files, runtime configuration, or prior Kanban workspaces/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Limit every terminal response to 160 lines or 12 KiB/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, new RegExp(storySha));
+    assert.doesNotMatch(amendedState.tasks.product_capture.params.instruction, /Complete the native Hermes Kanban card/);
     assert.strictEqual(amendedState.tasks.product_capture.params.instruction, amendedStage.params.instruction);
     assert.ok(fs.existsSync(path.join(reportRoot, 'product_capture.contract-amendment.json')));
     assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_capture_contract_amended/);

@@ -334,6 +334,20 @@ function bindStoryToCapture(projectPath, runId, storySha, now = new Date().toISO
   return binding;
 }
 
+function compactEp2CaptureRetryInstruction(projectPath, runId, storySha) {
+  const storyPath = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId, 'reports', 'script_package.controller-reviewed.md');
+  return [
+    'Compact retry contract for EP2 product capture.',
+    'This retry replaces a stalled attempt that exceeded its context budget before a canonical manifest existed.',
+    `Read only ${storyPath}; verify SHA-256 ${storySha}, then read only its Truth Boundary, Capture Contract, and Claims Not To Use sections.`,
+    'Do not read repository files, runtime configuration, or prior Kanban workspaces.',
+    'Use only a dedicated local DEMO DATA fixture. HOME must resolve inside that fixture. Never run bare sdtk usage, inspect an operator home, or expose private account, model, token, rate-limit, credential, or identifier data.',
+    'Limit every terminal response to 160 lines or 12 KiB. Do not request recursive listings or full JSON outside the DEMO fixture.',
+    'Write the required DEMO-only files and manifest only under the canonical artifact root supplied in this task. The manifest must list every asset path, SHA-256, byte count, purpose, command_run, exit_code, and data_classification demo_only.',
+    'If the fixture or command cannot be verified within those bounds, call kanban_block with a concise transient reason and stop. Do not render, publish, create child tasks, or inspect unrelated files.',
+  ].join(' ');
+}
+
 function amendCaptureContract(projectPath, runId, storySha, now = new Date().toISOString()) {
   const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
   const state = readState(projectPath, runId);
@@ -348,8 +362,8 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
   if (!storyLock || storyLock.status !== 'completed') throw new Error('capture amend requires completed owner_story_lock');
   if (workflow.workflow_id !== 'hermes_marketing_video_ep2_r3' || !stage || !stage.params) throw new Error('capture amend supports only the fixed EP2 R3 workflow');
   if (sha256(review) !== storySha) throw new Error('capture amend Story Lock hash does not match the reviewed artifact');
-  const replacement = buildEp2Workflow(path.resolve(projectPath), 'EP2').stages.find((item) => item.id === 'product_capture').params.instruction;
-  if (!replacement.includes('dedicated local DEMO DATA fixture') || !replacement.includes('If no approved demo fixture is available, block the task before capture.')) {
+  const replacement = compactEp2CaptureRetryInstruction(projectPath, runId, storySha);
+  if (!replacement.includes('dedicated local DEMO DATA fixture') || !replacement.includes('Limit every terminal response to 160 lines or 12 KiB')) {
     throw new Error('capture amend source contract is not fail-closed');
   }
   const oldInstruction = String((capture.params && capture.params.instruction) || '');
@@ -360,7 +374,7 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
     approved_story_lock_sha256: storySha,
     previous_instruction_sha256: sha256(oldInstruction),
     replacement_instruction_sha256: sha256(replacement),
-    source: 'fixed_ep2_r3_demo_data_capture_contract',
+    source: 'controller_compact_ep2_demo_capture_retry_contract',
     amended_at: now,
   };
   writeJsonAtomic(path.join(root, 'reports', 'product_capture.contract-amendment.json'), amendment);
