@@ -10,7 +10,7 @@ const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'capture-accept', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
@@ -125,8 +125,8 @@ function parseArgs(argv) {
     else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
-  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, or handoff prepare');
+  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'capture-accept' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
+  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'capture-accept' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, capture accept, or handoff operations');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -140,7 +140,7 @@ function parseArgs(argv) {
   } else if (args.command === 'capture-amend') {
     requireRunId(args.runId);
     if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
-  } else if (args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
+  } else if (args.command === 'capture-accept' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
     requireRunId(args.runId);
   } else {
     requireRunId(args.runId);
@@ -436,6 +436,71 @@ function readCanonicalCaptureManifest(root, runId) {
   return { handoffRoot, manifestPath, manifest, manifestSha: sha256(bytes), assets: accepted };
 }
 
+function acceptDeterministicCapture(projectPath, runId, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const capture = state.tasks.product_capture;
+  if (state.status !== 'running' || !capture || capture.status !== 'ready') {
+    throw new Error('capture accept requires a running EP2 run with ready product_capture');
+  }
+  const canonical = readCanonicalCaptureManifest(root, runId);
+  if (canonical.manifest.fixture_isolated_home !== true
+    || typeof canonical.manifest.fixture_root !== 'string'
+    || !path.resolve(canonical.manifest.fixture_root).startsWith(path.join(root, 'fixtures') + path.sep)
+    || !String(canonical.manifest.command_run || '').includes('sdtk usage')) {
+    throw new Error('capture accept requires an isolated local usage-demo fixture');
+  }
+  if (canonical.assets.length !== CAPTURE_HANDOFF_ASSETS.size
+    || canonical.assets.some((asset) => !CAPTURE_HANDOFF_ASSETS.has(asset.relative.slice('assets/'.length)))) {
+    throw new Error('capture accept requires the complete allowlisted capture asset set');
+  }
+  const evidencePath = path.join(root, 'evidence', 'product_capture.evidence.json');
+  let evidence;
+  try {
+    const stat = fs.lstatSync(evidencePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('not a regular file');
+    evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch (_) {
+    throw new Error('capture accept requires submitted deterministic evidence');
+  }
+  if (!evidence || evidence.schema_version !== 'sdtk.agent-evidence.v1'
+    || evidence.run_id !== runId || evidence.task_id !== 'product_capture'
+    || !evidence.fields || evidence.fields.validation_status !== 'success'
+    || evidence.fields.data_classification !== 'demo_only'
+    || evidence.fields.fixture_isolated_home !== true
+    || evidence.fields.manifest_sha256 !== canonical.manifestSha
+    || evidence.fields.path !== canonical.manifestPath
+    || !evidence.external_ids || evidence.external_ids.evidence_mode !== 'controller_deterministic_fixture_runner'
+    || !Array.isArray(evidence.artifacts)
+    || !evidence.artifacts.some((artifact) => artifact && artifact.path === canonical.manifestPath && artifact.sha256 === canonical.manifestSha)) {
+    throw new Error('capture accept deterministic evidence contract is invalid');
+  }
+  const priorExternalTaskId = capture.external_ids && capture.external_ids.hermes_task_id || null;
+  capture.status = 'completed';
+  capture.completed_at = now;
+  capture.blocked_reason = null;
+  capture.last_error = null;
+  capture.external_ids = {};
+  capture.result = {
+    path: canonical.manifestPath,
+    sha256: canonical.manifestSha,
+    source: 'controller_deterministic_fixture_runner',
+    data_classification: 'demo_only',
+  };
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  const result = {
+    task_id: 'product_capture',
+    manifest_path: canonical.manifestPath,
+    manifest_sha256: canonical.manifestSha,
+    asset_count: canonical.assets.length,
+    prior_external_task_id: priorExternalTaskId,
+    accepted_at: now,
+  };
+  appendRunEvent(root, runId, 'controller_deterministic_capture_accepted', result, now);
+  return result;
+}
+
 function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString()) {
   const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
   const state = readState(projectPath, runId);
@@ -518,6 +583,7 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
 }
 
 function executeCommand(args, dependencies = {}) {
+  const captureAccept = dependencies.acceptDeterministicCapture || acceptDeterministicCapture;
   const handoffPrepare = dependencies.prepareCaptureHandoff || prepareCaptureHandoff;
   const handoffDeliver = dependencies.deliverCaptureHandoff || deliverCaptureHandoff;
   if (args.command === 'story-bind') {
@@ -525,6 +591,9 @@ function executeCommand(args, dependencies = {}) {
   }
   if (args.command === 'capture-amend') {
     return amendCaptureContract(args.projectPath, args.runId, args.storySha);
+  }
+  if (args.command === 'capture-accept') {
+    return captureAccept(args.projectPath, args.runId);
   }
   if (args.command === 'handoff-prepare') {
     return handoffPrepare(args.projectPath, args.runId);
@@ -568,4 +637,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { acceptDeterministicCapture, amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };

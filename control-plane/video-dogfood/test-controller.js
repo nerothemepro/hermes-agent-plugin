@@ -7,6 +7,7 @@ const path = require('path');
 const test = require('node:test');
 
 const {
+  acceptDeterministicCapture,
   amendCaptureContract,
   bindStoryToCapture,
   closeDefect,
@@ -77,6 +78,9 @@ test('continue requires explicit confirm and unsupported mutation verbs are reje
   assert.throws(() => parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64)]), /requires --confirm/);
   const amended = parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm']);
   assert.strictEqual(amended.command, 'capture-amend');
+  assert.throws(() => parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123']), /requires --confirm/);
+  const accepted = parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123', '--confirm']);
+  assert.strictEqual(accepted.command, 'capture-accept');
   assert.throws(() => parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123']), /requires --confirm/);
   const handoff = parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(handoff.command, 'handoff-prepare');
@@ -242,6 +246,69 @@ test('Story Lock binding fails closed on a hash mismatch', () => {
   const { projectPath, runId } = fixture({ status: 'waiting_for_approval', tasks: {} });
   try {
     assert.throws(() => bindStoryToCapture(projectPath, runId, 'a'.repeat(64)), /Story Lock artifact/);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+function writeDeterministicCaptureFixture(runRoot, runId) {
+  const handoffRoot = path.join(runRoot, 'artifacts', 'product_capture');
+  const files = {
+    'assets/demo_fixture/DEMO_DATA.txt': 'DEMO DATA - synthetic fixture only\n',
+    'assets/capture_table_output.txt': 'sdtk usage - DEMO DATA\n',
+    'assets/capture_json_output.txt': '{"demo":true}\n',
+    'assets/evidence_summary.txt': 'Synthetic local evidence only.\n',
+    'assets/asset_manifest.txt': 'asset manifest\n',
+  };
+  const hash = (value) => require('crypto').createHash('sha256').update(value).digest('hex');
+  const assets = Object.entries(files).map(([relative, value]) => {
+    const target = path.join(handoffRoot, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, value);
+    return { path: relative, sha256: hash(value), bytes: Buffer.byteLength(value), purpose: relative };
+  });
+  const fixtureRoot = path.join(runRoot, 'fixtures', 'usage-demo-home');
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  const manifest = {
+    schema_version: 'hermes.video-dogfood.capture-handoff.v1', run_id: runId,
+    source_task_id: 'product_capture', data_classification: 'demo_only', exit_code: 0,
+    fixture_isolated_home: true, fixture_root: fixtureRoot,
+    command_run: 'env HOME=<fixture> sdtk usage', assets,
+  };
+  const manifestPath = path.join(handoffRoot, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return { manifestPath, manifestSha: hash(fs.readFileSync(manifestPath)) };
+}
+
+test('capture accept completes only a ready EP2 demo fixture with hash-pinned submitted evidence', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-capture-accept-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  fs.mkdirSync(path.join(runRoot, 'evidence'), { recursive: true });
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'running', tasks: {
+      product_capture: { id: 'product_capture', type: 'task', status: 'ready', external_ids: { hermes_task_id: 't_rejected' } },
+      episode_render: { id: 'episode_render', type: 'task', status: 'waiting_for_dependency' },
+    },
+  }));
+  const canonical = writeDeterministicCaptureFixture(runRoot, runId);
+  fs.writeFileSync(path.join(runRoot, 'evidence', 'product_capture.evidence.json'), JSON.stringify({
+    schema_version: 'sdtk.agent-evidence.v1', run_id: runId, task_id: 'product_capture',
+    artifacts: [{ path: canonical.manifestPath, sha256: canonical.manifestSha }],
+    external_ids: { evidence_mode: 'controller_deterministic_fixture_runner' },
+    fields: { validation_status: 'success', data_classification: 'demo_only', fixture_isolated_home: true, path: canonical.manifestPath, manifest_sha256: canonical.manifestSha },
+  }));
+  try {
+    const result = acceptDeterministicCapture(projectPath, runId, '2026-08-20T14:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    assert.strictEqual(result.asset_count, 5);
+    assert.strictEqual(result.prior_external_task_id, 't_rejected');
+    assert.strictEqual(state.tasks.product_capture.status, 'completed');
+    assert.deepStrictEqual(state.tasks.product_capture.external_ids, {});
+    assert.strictEqual(state.tasks.product_capture.result.sha256, canonical.manifestSha);
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_deterministic_capture_accepted/);
+    assert.throws(() => acceptDeterministicCapture(projectPath, runId), /ready product_capture/);
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }
