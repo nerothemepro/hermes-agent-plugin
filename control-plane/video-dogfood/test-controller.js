@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const {
   amendCaptureContract,
+  bindStoryToCapture,
   closeDefect,
   deliverCaptureHandoff,
   executeCommand,
@@ -83,6 +84,10 @@ test('continue requires explicit confirm and unsupported mutation verbs are reje
   const delivery = parseArgs(['handoff', 'deliver', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(delivery.command, 'handoff-deliver');
   assert.throws(() => parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm', '--instruction', 'free text']), /unknown or incomplete/);
+  assert.throws(() => parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64)]), /requires --confirm/);
+  const storyBinding = parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm']);
+  assert.strictEqual(storyBinding.command, 'story-bind');
+  assert.throws(() => parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm', '--path', '/tmp/untrusted']), /unknown or incomplete/);
 });
 
 test('handoff prepare executes the controller handoff instead of invoking sdtk-agent', () => {
@@ -175,6 +180,67 @@ test('capture amendment replaces only failed EP2 capture instruction with audite
   }
 });
 
+
+
+test('Story Lock binding pins the reviewed artifact into capture without approving the gate', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-story-bind-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  const reportRoot = path.join(runRoot, 'reports');
+  const evidenceRoot = path.join(runRoot, 'evidence');
+  fs.mkdirSync(reportRoot, { recursive: true });
+  fs.mkdirSync(evidenceRoot, { recursive: true });
+  const reviewed = '# Controller-reviewed Story Lock\n';
+  const storySha = require('crypto').createHash('sha256').update(reviewed).digest('hex');
+  const oldInstruction = 'unbound capture instruction';
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'waiting_for_approval', tasks: {
+      owner_story_lock: { id: 'owner_story_lock', type: 'human_gate', status: 'waiting_for_approval' },
+      product_capture: { id: 'product_capture', type: 'task', status: 'waiting_for_dependency', params: { instruction: oldInstruction } },
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(runRoot, 'workflow.json'), JSON.stringify({
+    workflow_id: 'hermes_marketing_video_ep2_r3',
+    stages: [{ id: 'product_capture', type: 'task', depends_on: ['owner_story_lock'], params: { instruction: oldInstruction } }],
+  }, null, 2));
+  fs.writeFileSync(path.join(reportRoot, 'script_package.controller-reviewed.md'), reviewed);
+  fs.writeFileSync(path.join(evidenceRoot, 'script_package.evidence.json'), JSON.stringify({
+    schema_version: 'sdtk.agent-evidence.v1', run_id: runId, task_id: 'script_package',
+    summary: 'reviewed', verification_evidence: 'reviewed',
+    artifacts: [{ path: path.join(reportRoot, 'script_package.controller-reviewed.md'), sha256: storySha }],
+    fields: { story_lock_sha256: storySha, private_usage_data_used: false, demo_fixture_required: true, isolated_home_required: true },
+  }));
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  try {
+    const result = bindStoryToCapture(projectPath, runId, storySha, '2026-08-19T04:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    const workflow = JSON.parse(fs.readFileSync(path.join(runRoot, 'workflow.json'), 'utf8'));
+    const instruction = state.tasks.product_capture.params.instruction;
+    assert.strictEqual(result.story_lock_sha256, storySha);
+    assert.strictEqual(result.reused, false);
+    assert.strictEqual(state.status, 'waiting_for_approval');
+    assert.strictEqual(state.tasks.owner_story_lock.status, 'waiting_for_approval');
+    assert.match(instruction, /HOME environment must resolve inside that fixture/);
+    assert.match(instruction, new RegExp(storySha));
+    assert.match(instruction, /script_package\.controller-reviewed\.md/);
+    assert.strictEqual(workflow.stages[0].params.instruction, instruction);
+    assert.ok(fs.existsSync(path.join(reportRoot, 'product_capture.story-binding.json')));
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_story_bound_to_capture/);
+    const reused = bindStoryToCapture(projectPath, runId, storySha, '2026-08-19T04:01:00.000Z');
+    assert.strictEqual(reused.reused, true);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+test('Story Lock binding fails closed on a hash mismatch', () => {
+  const { projectPath, runId } = fixture({ status: 'waiting_for_approval', tasks: {} });
+  try {
+    assert.throws(() => bindStoryToCapture(projectPath, runId, 'a'.repeat(64)), /Story Lock artifact/);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
 
 test('capture handoff delivery uses one marker comment and does not duplicate it', () => {
   const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-delivery-'));

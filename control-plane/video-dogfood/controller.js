@@ -10,7 +10,7 @@ const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'capture-amend', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
@@ -91,7 +91,7 @@ function recommendNext(inspection) {
 function parseArgs(argv) {
   let command = argv[0] || '';
   let startIndex = 1;
-  if (command === 'defect' || command === 'capture' || command === 'handoff') {
+  if (command === 'defect' || command === 'story' || command === 'capture' || command === 'handoff') {
     command = `${command}-${argv[1] || ''}`;
     startIndex = 2;
   }
@@ -125,8 +125,8 @@ function parseArgs(argv) {
     else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if ((args.command === 'continue' || args.command === 'capture-amend' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
-  if (args.command !== 'continue' && args.command !== 'capture-amend' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, capture amend, or handoff prepare');
+  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
+  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, or handoff prepare');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -134,6 +134,9 @@ function parseArgs(argv) {
     }
   } else if (args.command === 'defect-close') {
     if (!args.defectId || !args.verification) throw new Error('defect close requires verification evidence');
+  } else if (args.command === 'story-bind') {
+    requireRunId(args.runId);
+    if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('story bind requires a sha256 Story Lock artifact');
   } else if (args.command === 'capture-amend') {
     requireRunId(args.runId);
     if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
@@ -248,6 +251,87 @@ function writeJsonAtomic(filePath, value, mode = 0o600) {
 
 function appendRunEvent(runRoot, runId, type, data, now) {
   fs.appendFileSync(path.join(runRoot, 'events.ndjson'), JSON.stringify({ ts: now, run_id: runId, type, data }) + '\n', { mode: 0o600 });
+}
+
+function bindStoryToCapture(projectPath, runId, storySha, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const reviewPath = path.join(root, 'reports', 'script_package.controller-reviewed.md');
+  const evidencePath = path.join(root, 'evidence', 'script_package.evidence.json');
+  const bindingPath = path.join(root, 'reports', 'product_capture.story-binding.json');
+  let review;
+  let evidence;
+  try {
+    const stat = fs.lstatSync(reviewPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('not a regular file');
+    review = fs.readFileSync(reviewPath);
+    evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch (_) {
+    throw new Error('controller-reviewed Story Lock artifact or evidence is unavailable');
+  }
+  if (sha256(review) !== storySha) throw new Error('Story Lock artifact sha256 does not match');
+  if (!evidence || evidence.run_id !== runId || evidence.task_id !== 'script_package'
+    || !evidence.fields || evidence.fields.story_lock_sha256 !== storySha
+    || evidence.fields.private_usage_data_used !== false
+    || evidence.fields.demo_fixture_required !== true
+    || evidence.fields.isolated_home_required !== true
+    || !Array.isArray(evidence.artifacts)
+    || !evidence.artifacts.some((item) => item && item.path === reviewPath && item.sha256 === storySha)) {
+    throw new Error('controller-reviewed Story Lock evidence contract is invalid');
+  }
+  try {
+    const existing = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
+    const existingState = readState(projectPath, runId);
+    const existingInstruction = String(existingState.tasks.product_capture && existingState.tasks.product_capture.params && existingState.tasks.product_capture.params.instruction || '');
+    if (existing.run_id === runId && existing.story_lock_sha256 === storySha
+      && sha256(existingInstruction) === existing.bound_instruction_sha256) {
+      return Object.assign({}, existing, { reused: true });
+    }
+    throw new Error('existing Story Lock binding does not match canonical capture state');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const state = readState(projectPath, runId);
+  const workflowPath = path.join(root, 'workflow.json');
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
+  const storyLock = state.tasks.owner_story_lock;
+  const capture = state.tasks.product_capture;
+  const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'product_capture');
+  if (state.status !== 'waiting_for_approval' || !storyLock || storyLock.status !== 'waiting_for_approval') {
+    throw new Error('Story Lock binding requires the pending owner_story_lock gate');
+  }
+  if (!capture || capture.status !== 'waiting_for_dependency' || !stage || !stage.params
+    || workflow.workflow_id !== 'hermes_marketing_video_ep2_r3') {
+    throw new Error('Story Lock binding supports only an undispatched EP2 R3 product_capture task');
+  }
+  const baseInstruction = buildEp2Workflow(path.resolve(projectPath), 'EP2').stages.find((item) => item.id === 'product_capture').params.instruction;
+  if (!baseInstruction.includes('HOME environment must resolve inside that fixture')
+    || !baseInstruction.includes('--dir alone does not isolate the default HOME scan')
+    || !baseInstruction.includes('Never run bare')) {
+    throw new Error('Story Lock binding source contract lacks isolated HOME safeguards');
+  }
+  const boundInstruction = baseInstruction + ' Controller-bound Story Lock: read ' + reviewPath + ', verify SHA-256 ' + storySha + ' before doing any capture work, and use it as the only story/claim source. If the file or hash differs, block without capture.';
+  const previousInstruction = String((capture.params && capture.params.instruction) || '');
+  const binding = {
+    schema_version: 'hermes.video-dogfood.story-capture-binding.v1',
+    run_id: runId,
+    source_task_id: 'script_package',
+    target_task_id: 'product_capture',
+    story_lock_path: reviewPath,
+    story_lock_sha256: storySha,
+    previous_instruction_sha256: sha256(previousInstruction),
+    bound_instruction_sha256: sha256(boundInstruction),
+    bound_at: now,
+    reused: false,
+  };
+  stage.params.instruction = boundInstruction;
+  capture.params = Object.assign({}, capture.params, { instruction: boundInstruction });
+  state.updated_at = now;
+  writeJsonAtomic(workflowPath, workflow);
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  writeJsonAtomic(bindingPath, binding);
+  appendRunEvent(root, runId, 'controller_story_bound_to_capture', binding, now);
+  return binding;
 }
 
 function amendCaptureContract(projectPath, runId, storySha, now = new Date().toISOString()) {
@@ -422,6 +506,9 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
 function executeCommand(args, dependencies = {}) {
   const handoffPrepare = dependencies.prepareCaptureHandoff || prepareCaptureHandoff;
   const handoffDeliver = dependencies.deliverCaptureHandoff || deliverCaptureHandoff;
+  if (args.command === 'story-bind') {
+    return bindStoryToCapture(args.projectPath, args.runId, args.storySha);
+  }
   if (args.command === 'capture-amend') {
     return amendCaptureContract(args.projectPath, args.runId, args.storySha);
   }
@@ -467,4 +554,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { amendCaptureContract, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };

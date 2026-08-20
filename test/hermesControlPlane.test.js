@@ -101,6 +101,9 @@ test('EP2 product capture is constrained to a labelled local demo fixture', () =
   assert.match(capture, /dedicated local DEMO DATA fixture/);
   assert.match(capture, /Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs/);
   assert.match(capture, /If no approved demo fixture is available, block the task before capture/);
+  assert.match(capture, /HOME environment must resolve inside that fixture/);
+  assert.match(capture, /--dir alone does not isolate the default HOME scan/);
+  assert.match(capture, /Never run bare/);
 });
 
 test('marketing video dogfood manifest resolves an allowlisted EP3 without freeform instructions', () => {
