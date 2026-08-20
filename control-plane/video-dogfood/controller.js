@@ -12,7 +12,7 @@ const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
 const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'capture-accept', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
-const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
+const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
 const CAPTURE_HANDOFF_ASSETS = new Set([
   'demo_fixture/DEMO_DATA.txt',
@@ -518,9 +518,9 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (stage.params.capture_handoff && stage.params.capture_handoff.manifest_sha256 === canonical.manifestSha) {
     return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: true };
   }
-  const clause = ' Use only canonical DEMO capture handoff ' + manifestRelative + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
+  const clause = ' Use only canonical DEMO capture handoff ' + canonical.manifestPath + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
   const instruction = String(stage.params.instruction || '').replace(/\s+$/, '') + clause;
-  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' } });
+  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' } });
   render.params = Object.assign({}, render.params, stage.params);
   state.updated_at = now;
   writeJsonAtomic(workflowPath, workflow);
@@ -556,7 +556,8 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   }
   const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
   const commandRunner = options.commandRunner || childProcess.spawnSync;
-  const env = Object.assign({}, process.env, { HERMES_HOME: HERVID_PROFILE_HOME, HERMES_KANBAN_HOME: HERVID_PROFILE_HOME });
+  const env = Object.assign({}, process.env, { HERMES_HOME: HERMES_DISPATCH_HOME });
+  delete env.HERMES_KANBAN_HOME;
   const shown = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
   if (!shown || shown.status !== 0) throw new Error('capture handoff cannot inspect native render card');
   let native;
@@ -567,9 +568,18 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (comments.some((comment) => String(comment.body || comment.text || comment.content || '').includes(marker) && String(comment.body || comment.text || comment.content || '').includes(manifestSha))) {
     return { task_id: cardId, manifest_path: manifestPath, manifest_sha256: manifestSha, delivered: true, reused: true };
   }
-  const body = handoffComment(manifestRelative, manifestSha);
+  const body = handoffComment(manifestPath, manifestSha);
   const commented = commandRunner(HERMES_BIN, ['kanban', 'comment', cardId, body, '--author', 'sdtk-controller'], { encoding: 'utf8', env });
   if (!commented || commented.status !== 0) throw new Error('capture handoff native comment failed');
+  const verified = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
+  if (!verified || verified.status !== 0) throw new Error('capture handoff cannot verify native comment');
+  let verifiedNative;
+  try { verifiedNative = JSON.parse(verified.stdout || '{}'); }
+  catch (_) { throw new Error('capture handoff native verification is invalid JSON'); }
+  const verifiedComments = Array.isArray(verifiedNative.comments) ? verifiedNative.comments : [];
+  if (!verifiedComments.some((comment) => String(comment.body || comment.text || comment.content || '').includes(HANDOFF_COMMENT_MARKER) && String(comment.body || comment.text || comment.content || '').includes(manifestSha))) {
+    throw new Error('capture handoff native comment did not persist');
+  }
   render.capture_handoff = Object.assign({}, render.capture_handoff, {
     manifest_path: manifestRelative,
     manifest_sha256: manifestSha,

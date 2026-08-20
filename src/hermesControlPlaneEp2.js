@@ -7,6 +7,7 @@ const EP2_TEMPLATE_ID = 'marketing_video_ep_usage';
 const EP2_PROFILES = ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial'];
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERMES_PROFILE_BASE = '/opt/data/hermes-profiles';
+const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const DEFAULT_SERIES_MANIFEST = path.join(__dirname, '..', 'control-plane', 'ep2-kanban', 'marketing-video-series.json');
 
 function loadEpisodeSpec(episodeId = 'EP2', manifestPath = DEFAULT_SERIES_MANIFEST) {
@@ -83,10 +84,8 @@ function role(profile, runtime, options = {}) {
       backend: 'kanban-cli',
       profile,
       hermes_bin: HERMES_BIN,
-      env: {
-        HERMES_HOME: `${HERMES_PROFILE_BASE}/${profile}`,
-        HERMES_KANBAN_HOME: `${HERMES_PROFILE_BASE}/${profile}`,
-      },
+      // The adapter resolves cards from the dispatcher board; --assignee routes the worker profile.
+      env: { HERMES_HOME: HERMES_DISPATCH_HOME },
       board: runtime.board,
       live_ack: true,
       cancel_action: runtime.cancel_action,

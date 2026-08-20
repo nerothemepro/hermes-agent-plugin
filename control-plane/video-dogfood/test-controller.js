@@ -337,14 +337,15 @@ test('capture handoff delivery uses one marker comment and does not duplicate it
   try {
     const result = deliverCaptureHandoff(projectPath, runId, '2026-08-18T07:00:00.000Z', { commandRunner: runner });
     assert.strictEqual(result.delivered, true);
-    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(calls.length, 3);
     assert.strictEqual(calls[1][1], 'comment');
     assert.match(calls[1][3], /SDTK_CAPTURE_HANDOFF_V1/);
     assert.match(calls[1][3], new RegExp(result.manifest_sha256));
+    assert.strictEqual(calls[2][1], 'show');
     const retry = deliverCaptureHandoff(projectPath, runId, '2026-08-18T07:01:00.000Z', { commandRunner: runner });
     assert.strictEqual(retry.reused, true);
-    assert.strictEqual(calls.length, 3);
-    assert.strictEqual(calls[2][1], 'show');
+    assert.strictEqual(calls.length, 4);
+    assert.strictEqual(calls[3][1], 'show');
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }
