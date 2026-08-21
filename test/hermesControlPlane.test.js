@@ -94,6 +94,14 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"episode":"EP5"}', { templateRoot: TEMPLATE_ROOT }), /Invalid episode/);
 });
 
+test('EP2 render is pinned to the governed Playwright terminal capture workflow', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
+  const render = preview.workflow.stages.find((stage) => stage.id === 'episode_render');
+  assert.match(render.params.instruction, /sdtk-marketing video terminal-capture run/);
+  assert.match(render.params.instruction, /Playwright terminal composite labelled COMPOSITED FROM REAL COMMAND OUTPUT/);
+  assert.doesNotMatch(render.params.instruction, /VHS|sdtk-usage-20260725|SdtkTutorial/);
+});
+
 test('EP2 product capture is constrained to a labelled local demo fixture', () => {
   const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
   const capture = preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction;
