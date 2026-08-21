@@ -10,9 +10,9 @@ const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'capture-amend', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
+const SUPPORTED_COMMANDS = new Set(['inspect', 'next', 'reconcile', 'continue', 'story-bind', 'capture-amend', 'capture-accept', 'render-verify', 'handoff-prepare', 'handoff-deliver', 'defect-record', 'defect-close']);
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
-const HERVID_PROFILE_HOME = '/opt/data/hermes-profiles/hervid';
+const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const HANDOFF_COMMENT_MARKER = 'SDTK_CAPTURE_HANDOFF_V1';
 const CAPTURE_HANDOFF_ASSETS = new Set([
   'demo_fixture/DEMO_DATA.txt',
@@ -68,6 +68,9 @@ function inspectRun(projectPath, runId) {
 
 function recommendNext(inspection) {
   if (inspection.owner_gate) {
+    if (inspection.owner_gate === 'owner_picture_lock') {
+      return { action: 'render_output_verification_required', task_id: 'episode_render', mutates_state: false };
+    }
     return { action: 'owner_approval_required', gate_id: inspection.owner_gate, mutates_state: false };
   }
   if (['blocked', 'cancelled', 'completed', 'failed'].includes(inspection.status)) {
@@ -91,7 +94,7 @@ function recommendNext(inspection) {
 function parseArgs(argv) {
   let command = argv[0] || '';
   let startIndex = 1;
-  if (command === 'defect' || command === 'capture' || command === 'handoff') {
+  if (command === 'defect' || command === 'story' || command === 'capture' || command === 'render' || command === 'handoff') {
     command = `${command}-${argv[1] || ''}`;
     startIndex = 2;
   }
@@ -125,8 +128,8 @@ function parseArgs(argv) {
     else if (arg === '--story-sha' && argv[index + 1]) args.storySha = argv[++index];
     else throw new Error(`unknown or incomplete argument: ${arg}`);
   }
-  if ((args.command === 'continue' || args.command === 'capture-amend' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
-  if (args.command !== 'continue' && args.command !== 'capture-amend' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, capture amend, or handoff prepare');
+  if ((args.command === 'continue' || args.command === 'story-bind' || args.command === 'capture-amend' || args.command === 'capture-accept' || args.command === 'render-verify' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') && !args.confirm) throw new Error(args.command + ' requires --confirm');
+  if (args.command !== 'continue' && args.command !== 'story-bind' && args.command !== 'capture-amend' && args.command !== 'capture-accept' && args.command !== 'render-verify' && args.command !== 'handoff-prepare' && args.command !== 'handoff-deliver' && args.confirm) throw new Error('--confirm is valid only for continue, story bind, capture amend, capture accept, render verify, or handoff operations');
   if (args.command === 'defect-record') {
     requireRunId(args.runId);
     if (!args.defectId || !args.title || !args.severity || !args.taskId || !args.blockerClass || !args.nextAction) {
@@ -134,10 +137,13 @@ function parseArgs(argv) {
     }
   } else if (args.command === 'defect-close') {
     if (!args.defectId || !args.verification) throw new Error('defect close requires verification evidence');
+  } else if (args.command === 'story-bind') {
+    requireRunId(args.runId);
+    if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('story bind requires a sha256 Story Lock artifact');
   } else if (args.command === 'capture-amend') {
     requireRunId(args.runId);
     if (!/^[a-f0-9]{64}$/.test(args.storySha)) throw new Error('capture amend requires a sha256 Story Lock artifact');
-  } else if (args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
+  } else if (args.command === 'capture-accept' || args.command === 'render-verify' || args.command === 'handoff-prepare' || args.command === 'handoff-deliver') {
     requireRunId(args.runId);
   } else {
     requireRunId(args.runId);
@@ -250,6 +256,101 @@ function appendRunEvent(runRoot, runId, type, data, now) {
   fs.appendFileSync(path.join(runRoot, 'events.ndjson'), JSON.stringify({ ts: now, run_id: runId, type, data }) + '\n', { mode: 0o600 });
 }
 
+function bindStoryToCapture(projectPath, runId, storySha, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const reviewPath = path.join(root, 'reports', 'script_package.controller-reviewed.md');
+  const evidencePath = path.join(root, 'evidence', 'script_package.evidence.json');
+  const bindingPath = path.join(root, 'reports', 'product_capture.story-binding.json');
+  let review;
+  let evidence;
+  try {
+    const stat = fs.lstatSync(reviewPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('not a regular file');
+    review = fs.readFileSync(reviewPath);
+    evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch (_) {
+    throw new Error('controller-reviewed Story Lock artifact or evidence is unavailable');
+  }
+  if (sha256(review) !== storySha) throw new Error('Story Lock artifact sha256 does not match');
+  if (!evidence || evidence.run_id !== runId || evidence.task_id !== 'script_package'
+    || !evidence.fields || evidence.fields.story_lock_sha256 !== storySha
+    || evidence.fields.private_usage_data_used !== false
+    || evidence.fields.demo_fixture_required !== true
+    || evidence.fields.isolated_home_required !== true
+    || !Array.isArray(evidence.artifacts)
+    || !evidence.artifacts.some((item) => item && item.path === reviewPath && item.sha256 === storySha)) {
+    throw new Error('controller-reviewed Story Lock evidence contract is invalid');
+  }
+  try {
+    const existing = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
+    const existingState = readState(projectPath, runId);
+    const existingInstruction = String(existingState.tasks.product_capture && existingState.tasks.product_capture.params && existingState.tasks.product_capture.params.instruction || '');
+    if (existing.run_id === runId && existing.story_lock_sha256 === storySha
+      && sha256(existingInstruction) === existing.bound_instruction_sha256) {
+      return Object.assign({}, existing, { reused: true });
+    }
+    throw new Error('existing Story Lock binding does not match canonical capture state');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const state = readState(projectPath, runId);
+  const workflowPath = path.join(root, 'workflow.json');
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
+  const storyLock = state.tasks.owner_story_lock;
+  const capture = state.tasks.product_capture;
+  const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'product_capture');
+  if (state.status !== 'waiting_for_approval' || !storyLock || storyLock.status !== 'waiting_for_approval') {
+    throw new Error('Story Lock binding requires the pending owner_story_lock gate');
+  }
+  if (!capture || capture.status !== 'waiting_for_dependency' || !stage || !stage.params
+    || workflow.workflow_id !== 'hermes_marketing_video_ep2_r3') {
+    throw new Error('Story Lock binding supports only an undispatched EP2 R3 product_capture task');
+  }
+  const baseInstruction = buildEp2Workflow(path.resolve(projectPath), 'EP2').stages.find((item) => item.id === 'product_capture').params.instruction;
+  if (!baseInstruction.includes('HOME environment must resolve inside that fixture')
+    || !baseInstruction.includes('--dir alone does not isolate the default HOME scan')
+    || !baseInstruction.includes('Never run bare')) {
+    throw new Error('Story Lock binding source contract lacks isolated HOME safeguards');
+  }
+  const boundInstruction = baseInstruction + ' Controller-bound Story Lock: read ' + reviewPath + ', verify SHA-256 ' + storySha + ' before doing any capture work, and use it as the only story/claim source. If the file or hash differs, block without capture.';
+  const previousInstruction = String((capture.params && capture.params.instruction) || '');
+  const binding = {
+    schema_version: 'hermes.video-dogfood.story-capture-binding.v1',
+    run_id: runId,
+    source_task_id: 'script_package',
+    target_task_id: 'product_capture',
+    story_lock_path: reviewPath,
+    story_lock_sha256: storySha,
+    previous_instruction_sha256: sha256(previousInstruction),
+    bound_instruction_sha256: sha256(boundInstruction),
+    bound_at: now,
+    reused: false,
+  };
+  stage.params.instruction = boundInstruction;
+  capture.params = Object.assign({}, capture.params, { instruction: boundInstruction });
+  state.updated_at = now;
+  writeJsonAtomic(workflowPath, workflow);
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  writeJsonAtomic(bindingPath, binding);
+  appendRunEvent(root, runId, 'controller_story_bound_to_capture', binding, now);
+  return binding;
+}
+
+function compactEp2CaptureRetryInstruction(projectPath, runId, storySha) {
+  const storyPath = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId, 'reports', 'script_package.controller-reviewed.md');
+  return [
+    'Compact retry contract for EP2 product capture.',
+    'This retry replaces a stalled attempt that exceeded its context budget before a canonical manifest existed.',
+    `Read only ${storyPath}; verify SHA-256 ${storySha}, then read only its Truth Boundary, Capture Contract, and Claims Not To Use sections.`,
+    'Do not read repository files, runtime configuration, or prior Kanban workspaces.',
+    'Use only a dedicated local DEMO DATA fixture. HOME must resolve inside that fixture. Never run bare sdtk usage, inspect an operator home, or expose private account, model, token, rate-limit, credential, or identifier data.',
+    'Limit every terminal response to 160 lines or 12 KiB. Do not request recursive listings or full JSON outside the DEMO fixture.',
+    'Write the required DEMO-only files and manifest only under the canonical artifact root supplied in this task. The manifest must list every asset path, SHA-256, byte count, purpose, command_run, exit_code, and data_classification demo_only.',
+    'If the fixture or command cannot be verified within those bounds, call kanban_block with a concise transient reason and stop. Do not render, publish, create child tasks, or inspect unrelated files.',
+  ].join(' ');
+}
+
 function amendCaptureContract(projectPath, runId, storySha, now = new Date().toISOString()) {
   const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
   const state = readState(projectPath, runId);
@@ -264,8 +365,8 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
   if (!storyLock || storyLock.status !== 'completed') throw new Error('capture amend requires completed owner_story_lock');
   if (workflow.workflow_id !== 'hermes_marketing_video_ep2_r3' || !stage || !stage.params) throw new Error('capture amend supports only the fixed EP2 R3 workflow');
   if (sha256(review) !== storySha) throw new Error('capture amend Story Lock hash does not match the reviewed artifact');
-  const replacement = buildEp2Workflow(path.resolve(projectPath), 'EP2').stages.find((item) => item.id === 'product_capture').params.instruction;
-  if (!replacement.includes('dedicated local DEMO DATA fixture') || !replacement.includes('If no approved demo fixture is available, block the task before capture.')) {
+  const replacement = compactEp2CaptureRetryInstruction(projectPath, runId, storySha);
+  if (!replacement.includes('dedicated local DEMO DATA fixture') || !replacement.includes('Limit every terminal response to 160 lines or 12 KiB')) {
     throw new Error('capture amend source contract is not fail-closed');
   }
   const oldInstruction = String((capture.params && capture.params.instruction) || '');
@@ -276,7 +377,7 @@ function amendCaptureContract(projectPath, runId, storySha, now = new Date().toI
     approved_story_lock_sha256: storySha,
     previous_instruction_sha256: sha256(oldInstruction),
     replacement_instruction_sha256: sha256(replacement),
-    source: 'fixed_ep2_r3_demo_data_capture_contract',
+    source: 'controller_compact_ep2_demo_capture_retry_contract',
     amended_at: now,
   };
   writeJsonAtomic(path.join(root, 'reports', 'product_capture.contract-amendment.json'), amendment);
@@ -338,6 +439,71 @@ function readCanonicalCaptureManifest(root, runId) {
   return { handoffRoot, manifestPath, manifest, manifestSha: sha256(bytes), assets: accepted };
 }
 
+function acceptDeterministicCapture(projectPath, runId, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const capture = state.tasks.product_capture;
+  if (state.status !== 'running' || !capture || capture.status !== 'ready') {
+    throw new Error('capture accept requires a running EP2 run with ready product_capture');
+  }
+  const canonical = readCanonicalCaptureManifest(root, runId);
+  if (canonical.manifest.fixture_isolated_home !== true
+    || typeof canonical.manifest.fixture_root !== 'string'
+    || !path.resolve(canonical.manifest.fixture_root).startsWith(path.join(root, 'fixtures') + path.sep)
+    || !String(canonical.manifest.command_run || '').includes('sdtk usage')) {
+    throw new Error('capture accept requires an isolated local usage-demo fixture');
+  }
+  if (canonical.assets.length !== CAPTURE_HANDOFF_ASSETS.size
+    || canonical.assets.some((asset) => !CAPTURE_HANDOFF_ASSETS.has(asset.relative.slice('assets/'.length)))) {
+    throw new Error('capture accept requires the complete allowlisted capture asset set');
+  }
+  const evidencePath = path.join(root, 'evidence', 'product_capture.evidence.json');
+  let evidence;
+  try {
+    const stat = fs.lstatSync(evidencePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('not a regular file');
+    evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch (_) {
+    throw new Error('capture accept requires submitted deterministic evidence');
+  }
+  if (!evidence || evidence.schema_version !== 'sdtk.agent-evidence.v1'
+    || evidence.run_id !== runId || evidence.task_id !== 'product_capture'
+    || !evidence.fields || evidence.fields.validation_status !== 'success'
+    || evidence.fields.data_classification !== 'demo_only'
+    || evidence.fields.fixture_isolated_home !== true
+    || evidence.fields.manifest_sha256 !== canonical.manifestSha
+    || evidence.fields.path !== canonical.manifestPath
+    || !evidence.external_ids || evidence.external_ids.evidence_mode !== 'controller_deterministic_fixture_runner'
+    || !Array.isArray(evidence.artifacts)
+    || !evidence.artifacts.some((artifact) => artifact && artifact.path === canonical.manifestPath && artifact.sha256 === canonical.manifestSha)) {
+    throw new Error('capture accept deterministic evidence contract is invalid');
+  }
+  const priorExternalTaskId = capture.external_ids && capture.external_ids.hermes_task_id || null;
+  capture.status = 'completed';
+  capture.completed_at = now;
+  capture.blocked_reason = null;
+  capture.last_error = null;
+  capture.external_ids = {};
+  capture.result = {
+    path: canonical.manifestPath,
+    sha256: canonical.manifestSha,
+    source: 'controller_deterministic_fixture_runner',
+    data_classification: 'demo_only',
+  };
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  const result = {
+    task_id: 'product_capture',
+    manifest_path: canonical.manifestPath,
+    manifest_sha256: canonical.manifestSha,
+    asset_count: canonical.assets.length,
+    prior_external_task_id: priorExternalTaskId,
+    accepted_at: now,
+  };
+  appendRunEvent(root, runId, 'controller_deterministic_capture_accepted', result, now);
+  return result;
+}
+
 function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString()) {
   const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
   const state = readState(projectPath, runId);
@@ -348,6 +514,10 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   }
   const canonical = readCanonicalCaptureManifest(root, runId);
   const manifestRelative = path.relative(root, canonical.manifestPath).split(path.sep).join('/');
+  const renderOutput = {
+    video_path: path.join(root, 'artifacts', 'episode_render', 'episode.mp4'),
+    quality_report_path: path.join(root, 'reports', 'episode_render.quality.json'),
+  };
   const workflowPath = path.join(root, 'workflow.json');
   const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
   const stage = Array.isArray(workflow.stages) && workflow.stages.find((item) => item && item.id === 'episode_render');
@@ -355,15 +525,88 @@ function prepareCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (stage.params.capture_handoff && stage.params.capture_handoff.manifest_sha256 === canonical.manifestSha) {
     return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: true };
   }
-  const clause = ' Use only canonical DEMO capture handoff ' + manifestRelative + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace.';
+  const clause = ' Use only canonical DEMO capture handoff ' + canonical.manifestPath + '; manifest SHA-256: ' + canonical.manifestSha + '. Verify every listed asset hash before rendering. Do not read the HerDev workspace. Write the rendered MP4 only to ' + renderOutput.video_path + ' and the factual quality report only to ' + renderOutput.quality_report_path + '. Do not complete this task without both files.';
   const instruction = String(stage.params.instruction || '').replace(/\s+$/, '') + clause;
-  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' } });
+  stage.params = Object.assign({}, stage.params, { instruction, capture_handoff: { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, data_classification: 'demo_only' }, render_output: renderOutput });
   render.params = Object.assign({}, render.params, stage.params);
   state.updated_at = now;
   writeJsonAtomic(workflowPath, workflow);
   writeJsonAtomic(statePath(projectPath, runId), state);
   appendRunEvent(root, runId, 'controller_capture_handoff_prepared', { task_id: 'episode_render', manifest_path: manifestRelative, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length }, now);
   return { manifest_path: canonical.manifestPath, manifest_sha256: canonical.manifestSha, asset_count: canonical.assets.length, reused: false };
+}
+
+function markRenderVerificationFailure(projectPath, runId, state, reason, now) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId);
+  const render = state.tasks.episode_render;
+  const pictureLock = state.tasks.owner_picture_lock;
+  render.status = 'failed';
+  render.failed_at = now;
+  render.blocked_reason = reason;
+  render.last_error = reason;
+  render.last_errors = (Array.isArray(render.last_errors) ? render.last_errors : []).concat([{ code: 'HERMES_RENDER_OUTPUT_INVALID', detail: reason }]);
+  if (pictureLock && pictureLock.status === 'waiting_for_approval') {
+    pictureLock.status = 'blocked';
+    pictureLock.blocked_by = 'episode_render';
+    pictureLock.blocked_reason = reason;
+  }
+  for (const task of Object.values(state.tasks)) {
+    if (task && task.status === 'waiting_for_dependency') {
+      task.status = 'blocked';
+      task.blocked_by = task.depends_on && task.depends_on[0] || 'episode_render';
+    }
+  }
+  state.status = 'blocked';
+  state.waiting_gate_id = null;
+  state.waiting_task_id = null;
+  state.blocker = 'episode_render: ' + reason;
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_render_output_rejected', { task_id: 'episode_render', reason }, now);
+  return { valid: false, task_id: 'episode_render', reason };
+}
+
+function verifyRenderOutput(projectPath, runId, now = new Date().toISOString()) {
+  const root = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId));
+  const state = readState(projectPath, runId);
+  const render = state.tasks.episode_render;
+  const pictureLock = state.tasks.owner_picture_lock;
+  if (state.status !== 'waiting_for_approval' || !render || render.status !== 'completed'
+    || !pictureLock || pictureLock.status !== 'waiting_for_approval') {
+    throw new Error('render verify requires completed episode_render awaiting owner_picture_lock');
+  }
+  const output = render.params && render.params.render_output;
+  const expectedVideo = path.join(root, 'artifacts', 'episode_render', 'episode.mp4');
+  const expectedReport = path.join(root, 'reports', 'episode_render.quality.json');
+  if (!output || output.video_path !== expectedVideo || output.quality_report_path !== expectedReport) {
+    return markRenderVerificationFailure(projectPath, runId, state, 'canonical render output contract is missing', now);
+  }
+  let videoBytes;
+  let report;
+  try {
+    if (!fs.existsSync(expectedVideo)) throw new Error('rendered MP4 is missing or too small');
+    const videoStat = fs.lstatSync(expectedVideo);
+    if (!videoStat.isFile() || videoStat.isSymbolicLink() || videoStat.size < 65536) throw new Error('rendered MP4 is missing or too small');
+    videoBytes = fs.readFileSync(expectedVideo);
+    if (!fs.existsSync(expectedReport)) throw new Error('quality report is missing');
+    const reportStat = fs.lstatSync(expectedReport);
+    if (!reportStat.isFile() || reportStat.isSymbolicLink()) throw new Error('quality report is missing');
+    report = JSON.parse(fs.readFileSync(expectedReport, 'utf8'));
+  } catch (error) {
+    return markRenderVerificationFailure(projectPath, runId, state, error.message, now);
+  }
+  const videoSha = sha256(videoBytes);
+  if (!report || report.run_id !== runId || report.task_id !== 'episode_render'
+    || report.video_path !== expectedVideo || report.video_sha256 !== videoSha
+    || report.quality_status !== 'pass') {
+    return markRenderVerificationFailure(projectPath, runId, state, 'quality report does not attest the canonical rendered MP4', now);
+  }
+  const verification = { task_id: 'episode_render', video_path: expectedVideo, video_sha256: videoSha, quality_report_path: expectedReport, verified_at: now };
+  writeJsonAtomic(path.join(root, 'reports', 'episode_render.controller-verified.json'), verification);
+  state.updated_at = now;
+  writeJsonAtomic(statePath(projectPath, runId), state);
+  appendRunEvent(root, runId, 'controller_render_output_verified', verification, now);
+  return Object.assign({ valid: true }, verification);
 }
 
 function handoffComment(manifestRelative, manifestSha) {
@@ -393,7 +636,8 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   }
   const manifestRelative = path.relative(root, manifestPath).split(path.sep).join('/');
   const commandRunner = options.commandRunner || childProcess.spawnSync;
-  const env = Object.assign({}, process.env, { HERMES_HOME: HERVID_PROFILE_HOME, HERMES_KANBAN_HOME: HERVID_PROFILE_HOME });
+  const env = Object.assign({}, process.env, { HERMES_HOME: HERMES_DISPATCH_HOME });
+  delete env.HERMES_KANBAN_HOME;
   const shown = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
   if (!shown || shown.status !== 0) throw new Error('capture handoff cannot inspect native render card');
   let native;
@@ -404,9 +648,18 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
   if (comments.some((comment) => String(comment.body || comment.text || comment.content || '').includes(marker) && String(comment.body || comment.text || comment.content || '').includes(manifestSha))) {
     return { task_id: cardId, manifest_path: manifestPath, manifest_sha256: manifestSha, delivered: true, reused: true };
   }
-  const body = handoffComment(manifestRelative, manifestSha);
+  const body = handoffComment(manifestPath, manifestSha);
   const commented = commandRunner(HERMES_BIN, ['kanban', 'comment', cardId, body, '--author', 'sdtk-controller'], { encoding: 'utf8', env });
   if (!commented || commented.status !== 0) throw new Error('capture handoff native comment failed');
+  const verified = commandRunner(HERMES_BIN, ['kanban', 'show', cardId, '--json'], { encoding: 'utf8', env });
+  if (!verified || verified.status !== 0) throw new Error('capture handoff cannot verify native comment');
+  let verifiedNative;
+  try { verifiedNative = JSON.parse(verified.stdout || '{}'); }
+  catch (_) { throw new Error('capture handoff native verification is invalid JSON'); }
+  const verifiedComments = Array.isArray(verifiedNative.comments) ? verifiedNative.comments : [];
+  if (!verifiedComments.some((comment) => String(comment.body || comment.text || comment.content || '').includes(HANDOFF_COMMENT_MARKER) && String(comment.body || comment.text || comment.content || '').includes(manifestSha))) {
+    throw new Error('capture handoff native comment did not persist');
+  }
   render.capture_handoff = Object.assign({}, render.capture_handoff, {
     manifest_path: manifestRelative,
     manifest_sha256: manifestSha,
@@ -420,10 +673,21 @@ function deliverCaptureHandoff(projectPath, runId, now = new Date().toISOString(
 }
 
 function executeCommand(args, dependencies = {}) {
+  const captureAccept = dependencies.acceptDeterministicCapture || acceptDeterministicCapture;
+  const renderVerify = dependencies.verifyRenderOutput || verifyRenderOutput;
   const handoffPrepare = dependencies.prepareCaptureHandoff || prepareCaptureHandoff;
   const handoffDeliver = dependencies.deliverCaptureHandoff || deliverCaptureHandoff;
+  if (args.command === 'story-bind') {
+    return bindStoryToCapture(args.projectPath, args.runId, args.storySha);
+  }
   if (args.command === 'capture-amend') {
     return amendCaptureContract(args.projectPath, args.runId, args.storySha);
+  }
+  if (args.command === 'capture-accept') {
+    return captureAccept(args.projectPath, args.runId);
+  }
+  if (args.command === 'render-verify') {
+    return renderVerify(args.projectPath, args.runId);
   }
   if (args.command === 'handoff-prepare') {
     return handoffPrepare(args.projectPath, args.runId);
@@ -467,4 +731,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { amendCaptureContract, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk };
+module.exports = { acceptDeterministicCapture, amendCaptureContract, bindStoryToCapture, closeDefect, deliverCaptureHandoff, executeCommand, inspectRun, markRenderVerificationFailure, parseArgs, prepareCaptureHandoff, readDefectLedger, readState, recommendNext, recordDefect, runSdtk, verifyRenderOutput };

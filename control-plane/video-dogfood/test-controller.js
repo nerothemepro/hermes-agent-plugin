@@ -7,7 +7,9 @@ const path = require('path');
 const test = require('node:test');
 
 const {
+  acceptDeterministicCapture,
   amendCaptureContract,
+  bindStoryToCapture,
   closeDefect,
   deliverCaptureHandoff,
   executeCommand,
@@ -16,6 +18,7 @@ const {
   parseArgs,
   recommendNext,
   recordDefect,
+  verifyRenderOutput,
 } = require('./controller');
 
 function fixture(state) {
@@ -76,6 +79,12 @@ test('continue requires explicit confirm and unsupported mutation verbs are reje
   assert.throws(() => parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64)]), /requires --confirm/);
   const amended = parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm']);
   assert.strictEqual(amended.command, 'capture-amend');
+  assert.throws(() => parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123']), /requires --confirm/);
+  const accepted = parseArgs(['capture', 'accept', '--run-id', 'run_controller_abc123', '--confirm']);
+  assert.strictEqual(accepted.command, 'capture-accept');
+  assert.throws(() => parseArgs(['render', 'verify', '--run-id', 'run_controller_abc123']), /requires --confirm/);
+  const renderVerified = parseArgs(['render', 'verify', '--run-id', 'run_controller_abc123', '--confirm']);
+  assert.strictEqual(renderVerified.command, 'render-verify');
   assert.throws(() => parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123']), /requires --confirm/);
   const handoff = parseArgs(['handoff', 'prepare', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(handoff.command, 'handoff-prepare');
@@ -83,6 +92,10 @@ test('continue requires explicit confirm and unsupported mutation verbs are reje
   const delivery = parseArgs(['handoff', 'deliver', '--run-id', 'run_controller_abc123', '--confirm']);
   assert.strictEqual(delivery.command, 'handoff-deliver');
   assert.throws(() => parseArgs(['capture', 'amend', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm', '--instruction', 'free text']), /unknown or incomplete/);
+  assert.throws(() => parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64)]), /requires --confirm/);
+  const storyBinding = parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm']);
+  assert.strictEqual(storyBinding.command, 'story-bind');
+  assert.throws(() => parseArgs(['story', 'bind', '--run-id', 'run_controller_abc123', '--story-sha', 'a'.repeat(64), '--confirm', '--path', '/tmp/untrusted']), /unknown or incomplete/);
 });
 
 test('handoff prepare executes the controller handoff instead of invoking sdtk-agent', () => {
@@ -167,6 +180,11 @@ test('capture amendment replaces only failed EP2 capture instruction with audite
     const amendedStage = amendedWorkflow.stages.find((stage) => stage.id === 'product_capture');
     assert.strictEqual(result.task_id, 'product_capture');
     assert.match(amendedState.tasks.product_capture.params.instruction, /dedicated local DEMO DATA fixture/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Compact retry contract/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Do not read repository files, runtime configuration, or prior Kanban workspaces/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, /Limit every terminal response to 160 lines or 12 KiB/);
+    assert.match(amendedState.tasks.product_capture.params.instruction, new RegExp(storySha));
+    assert.doesNotMatch(amendedState.tasks.product_capture.params.instruction, /Complete the native Hermes Kanban card/);
     assert.strictEqual(amendedState.tasks.product_capture.params.instruction, amendedStage.params.instruction);
     assert.ok(fs.existsSync(path.join(reportRoot, 'product_capture.contract-amendment.json')));
     assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_capture_contract_amended/);
@@ -175,6 +193,158 @@ test('capture amendment replaces only failed EP2 capture instruction with audite
   }
 });
 
+
+
+test('Story Lock binding pins the reviewed artifact into capture without approving the gate', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-story-bind-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  const reportRoot = path.join(runRoot, 'reports');
+  const evidenceRoot = path.join(runRoot, 'evidence');
+  fs.mkdirSync(reportRoot, { recursive: true });
+  fs.mkdirSync(evidenceRoot, { recursive: true });
+  const reviewed = '# Controller-reviewed Story Lock\n';
+  const storySha = require('crypto').createHash('sha256').update(reviewed).digest('hex');
+  const oldInstruction = 'unbound capture instruction';
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'waiting_for_approval', tasks: {
+      owner_story_lock: { id: 'owner_story_lock', type: 'human_gate', status: 'waiting_for_approval' },
+      product_capture: { id: 'product_capture', type: 'task', status: 'waiting_for_dependency', params: { instruction: oldInstruction } },
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(runRoot, 'workflow.json'), JSON.stringify({
+    workflow_id: 'hermes_marketing_video_ep2_r3',
+    stages: [{ id: 'product_capture', type: 'task', depends_on: ['owner_story_lock'], params: { instruction: oldInstruction } }],
+  }, null, 2));
+  fs.writeFileSync(path.join(reportRoot, 'script_package.controller-reviewed.md'), reviewed);
+  fs.writeFileSync(path.join(evidenceRoot, 'script_package.evidence.json'), JSON.stringify({
+    schema_version: 'sdtk.agent-evidence.v1', run_id: runId, task_id: 'script_package',
+    summary: 'reviewed', verification_evidence: 'reviewed',
+    artifacts: [{ path: path.join(reportRoot, 'script_package.controller-reviewed.md'), sha256: storySha }],
+    fields: { story_lock_sha256: storySha, private_usage_data_used: false, demo_fixture_required: true, isolated_home_required: true },
+  }));
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  try {
+    const result = bindStoryToCapture(projectPath, runId, storySha, '2026-08-19T04:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    const workflow = JSON.parse(fs.readFileSync(path.join(runRoot, 'workflow.json'), 'utf8'));
+    const instruction = state.tasks.product_capture.params.instruction;
+    assert.strictEqual(result.story_lock_sha256, storySha);
+    assert.strictEqual(result.reused, false);
+    assert.strictEqual(state.status, 'waiting_for_approval');
+    assert.strictEqual(state.tasks.owner_story_lock.status, 'waiting_for_approval');
+    assert.match(instruction, /HOME environment must resolve inside that fixture/);
+    assert.match(instruction, new RegExp(storySha));
+    assert.match(instruction, /script_package\.controller-reviewed\.md/);
+    assert.strictEqual(workflow.stages[0].params.instruction, instruction);
+    assert.ok(fs.existsSync(path.join(reportRoot, 'product_capture.story-binding.json')));
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_story_bound_to_capture/);
+    const reused = bindStoryToCapture(projectPath, runId, storySha, '2026-08-19T04:01:00.000Z');
+    assert.strictEqual(reused.reused, true);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+test('Story Lock binding fails closed on a hash mismatch', () => {
+  const { projectPath, runId } = fixture({ status: 'waiting_for_approval', tasks: {} });
+  try {
+    assert.throws(() => bindStoryToCapture(projectPath, runId, 'a'.repeat(64)), /Story Lock artifact/);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+function writeDeterministicCaptureFixture(runRoot, runId) {
+  const handoffRoot = path.join(runRoot, 'artifacts', 'product_capture');
+  const files = {
+    'assets/demo_fixture/DEMO_DATA.txt': 'DEMO DATA - synthetic fixture only\n',
+    'assets/capture_table_output.txt': 'sdtk usage - DEMO DATA\n',
+    'assets/capture_json_output.txt': '{"demo":true}\n',
+    'assets/evidence_summary.txt': 'Synthetic local evidence only.\n',
+    'assets/asset_manifest.txt': 'asset manifest\n',
+  };
+  const hash = (value) => require('crypto').createHash('sha256').update(value).digest('hex');
+  const assets = Object.entries(files).map(([relative, value]) => {
+    const target = path.join(handoffRoot, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, value);
+    return { path: relative, sha256: hash(value), bytes: Buffer.byteLength(value), purpose: relative };
+  });
+  const fixtureRoot = path.join(runRoot, 'fixtures', 'usage-demo-home');
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  const manifest = {
+    schema_version: 'hermes.video-dogfood.capture-handoff.v1', run_id: runId,
+    source_task_id: 'product_capture', data_classification: 'demo_only', exit_code: 0,
+    fixture_isolated_home: true, fixture_root: fixtureRoot,
+    command_run: 'env HOME=<fixture> sdtk usage', assets,
+  };
+  const manifestPath = path.join(handoffRoot, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return { manifestPath, manifestSha: hash(fs.readFileSync(manifestPath)) };
+}
+
+test('capture accept completes only a ready EP2 demo fixture with hash-pinned submitted evidence', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-capture-accept-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  fs.mkdirSync(path.join(runRoot, 'evidence'), { recursive: true });
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'running', tasks: {
+      product_capture: { id: 'product_capture', type: 'task', status: 'ready', external_ids: { hermes_task_id: 't_rejected' } },
+      episode_render: { id: 'episode_render', type: 'task', status: 'waiting_for_dependency' },
+    },
+  }));
+  const canonical = writeDeterministicCaptureFixture(runRoot, runId);
+  fs.writeFileSync(path.join(runRoot, 'evidence', 'product_capture.evidence.json'), JSON.stringify({
+    schema_version: 'sdtk.agent-evidence.v1', run_id: runId, task_id: 'product_capture',
+    artifacts: [{ path: canonical.manifestPath, sha256: canonical.manifestSha }],
+    external_ids: { evidence_mode: 'controller_deterministic_fixture_runner' },
+    fields: { validation_status: 'success', data_classification: 'demo_only', fixture_isolated_home: true, path: canonical.manifestPath, manifest_sha256: canonical.manifestSha },
+  }));
+  try {
+    const result = acceptDeterministicCapture(projectPath, runId, '2026-08-20T14:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    assert.strictEqual(result.asset_count, 5);
+    assert.strictEqual(result.prior_external_task_id, 't_rejected');
+    assert.strictEqual(state.tasks.product_capture.status, 'completed');
+    assert.deepStrictEqual(state.tasks.product_capture.external_ids, {});
+    assert.strictEqual(state.tasks.product_capture.result.sha256, canonical.manifestSha);
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_deterministic_capture_accepted/);
+    assert.throws(() => acceptDeterministicCapture(projectPath, runId), /ready product_capture/);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+test('render verification rejects a no-op completion before owner picture lock', () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-render-verify-'));
+  const runId = 'run_controller_abc123';
+  const runRoot = path.join(projectPath, '.sdtk', 'agent-runtime', 'runs', runId);
+  fs.mkdirSync(path.join(runRoot, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(runRoot, 'events.ndjson'), '');
+  fs.writeFileSync(path.join(runRoot, 'state.json'), JSON.stringify({
+    run_id: runId, status: 'waiting_for_approval', waiting_gate_id: 'owner_picture_lock', tasks: {
+      episode_render: { id: 'episode_render', type: 'task', status: 'completed', params: { render_output: {
+        video_path: path.join(runRoot, 'artifacts', 'episode_render', 'episode.mp4'),
+        quality_report_path: path.join(runRoot, 'reports', 'episode_render.quality.json'),
+      } } },
+      owner_picture_lock: { id: 'owner_picture_lock', type: 'human_gate', status: 'waiting_for_approval' },
+      social_package: { id: 'social_package', type: 'task', status: 'waiting_for_dependency', depends_on: ['owner_picture_lock'] },
+    },
+  }));
+  try {
+    const result = verifyRenderOutput(projectPath, runId, '2026-08-20T14:00:00.000Z');
+    const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+    assert.strictEqual(result.valid, false);
+    assert.match(result.reason, /rendered MP4 is missing/);
+    assert.strictEqual(state.status, 'blocked');
+    assert.strictEqual(state.tasks.episode_render.status, 'failed');
+    assert.strictEqual(state.tasks.owner_picture_lock.status, 'blocked');
+    assert.match(fs.readFileSync(path.join(runRoot, 'events.ndjson'), 'utf8'), /controller_render_output_rejected/);
+  } finally { fs.rmSync(projectPath, { recursive: true, force: true }); }
+});
 
 test('capture handoff delivery uses one marker comment and does not duplicate it', () => {
   const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'video-dogfood-delivery-'));
@@ -199,14 +369,15 @@ test('capture handoff delivery uses one marker comment and does not duplicate it
   try {
     const result = deliverCaptureHandoff(projectPath, runId, '2026-08-18T07:00:00.000Z', { commandRunner: runner });
     assert.strictEqual(result.delivered, true);
-    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(calls.length, 3);
     assert.strictEqual(calls[1][1], 'comment');
     assert.match(calls[1][3], /SDTK_CAPTURE_HANDOFF_V1/);
     assert.match(calls[1][3], new RegExp(result.manifest_sha256));
+    assert.strictEqual(calls[2][1], 'show');
     const retry = deliverCaptureHandoff(projectPath, runId, '2026-08-18T07:01:00.000Z', { commandRunner: runner });
     assert.strictEqual(retry.reused, true);
-    assert.strictEqual(calls.length, 3);
-    assert.strictEqual(calls[2][1], 'show');
+    assert.strictEqual(calls.length, 4);
+    assert.strictEqual(calls[3][1], 'show');
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }

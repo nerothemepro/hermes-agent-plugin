@@ -101,6 +101,9 @@ test('EP2 product capture is constrained to a labelled local demo fixture', () =
   assert.match(capture, /dedicated local DEMO DATA fixture/);
   assert.match(capture, /Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs/);
   assert.match(capture, /If no approved demo fixture is available, block the task before capture/);
+  assert.match(capture, /HOME environment must resolve inside that fixture/);
+  assert.match(capture, /--dir alone does not isolate the default HOME scan/);
+  assert.match(capture, /Never run bare/);
 });
 
 test('marketing video dogfood manifest resolves an allowlisted EP3 without freeform instructions', () => {
@@ -110,7 +113,7 @@ test('marketing video dogfood manifest resolves an allowlisted EP3 without freef
   assert.match(preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction, /Preview Studio/);
 });
 
-test('EP2 runtime map assigns each native Kanban CLI role its real profile home', () => {
+test('EP2 runtime map uses the shared dispatcher board while preserving each assignee profile', () => {
   const preview = previewTemplate('marketing_video_ep_usage', '{}', { templateRoot: TEMPLATE_ROOT });
   const expectedProfiles = {
     researcher: 'herresearch',
@@ -124,8 +127,8 @@ test('EP2 runtime map assigns each native Kanban CLI role its real profile home'
   assert.strictEqual(preview.runtime_map.hermes.profiles_source, '/opt/data/hermes-profiles');
   for (const [role, profile] of Object.entries(expectedProfiles)) {
     assert.strictEqual(preview.runtime_map.roles[role].config.profile, profile);
-    assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_HOME, `/opt/data/hermes-profiles/${profile}`);
-    assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_KANBAN_HOME, `/opt/data/hermes-profiles/${profile}`);
+    assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_HOME, '/opt/data/hermes');
+    assert.ok(!Object.prototype.hasOwnProperty.call(preview.runtime_map.roles[role].config.env, 'HERMES_KANBAN_HOME'));
     assert.strictEqual(preview.runtime_map.roles[role].config.preflight_timeout_ms, 30000);
   }
 });

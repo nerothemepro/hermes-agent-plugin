@@ -7,6 +7,7 @@ const EP2_TEMPLATE_ID = 'marketing_video_ep_usage';
 const EP2_PROFILES = ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial'];
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const HERMES_PROFILE_BASE = '/opt/data/hermes-profiles';
+const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const DEFAULT_SERIES_MANIFEST = path.join(__dirname, '..', 'control-plane', 'ep2-kanban', 'marketing-video-series.json');
 
 function loadEpisodeSpec(episodeId = 'EP2', manifestPath = DEFAULT_SERIES_MANIFEST) {
@@ -41,7 +42,7 @@ function instruction(stage, projectPath, episode) {
     case 'script_package':
       return `Synthesize the English script package for ${identity} from completed evidence and lessons. Required product proof: ${episode.dogfood.product_proof} Include claim ledger, shot list, narration draft, CTA ${episode.dogfood.cta}, and a list of evidence files expected under ${outputRoot}. Do not render, publish, or approve anything. ${shared}`;
     case 'product_capture':
-      return `Create only real, reproducible product-capture evidence for the owner-approved ${identity} script. Required product proof: ${episode.dogfood.product_proof} Use only a dedicated local DEMO DATA fixture visibly labelled DEMO DATA. Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs. If no approved demo fixture is available, block the task before capture. Before completion, write only approved DEMO capture assets and a SHA-256 manifest into the canonical artifact directory supplied in the native worker request; do not leave the only evidence in a Kanban scratch workspace. Do not fabricate UI, render final video, publish, or approve. ${shared}`;
+      return `Create only real, reproducible product-capture evidence for the owner-approved ${identity} script. Required product proof: ${episode.dogfood.product_proof} Use only a dedicated local DEMO DATA fixture visibly labelled DEMO DATA. The HOME environment must resolve inside that fixture for every usage command; --dir alone does not isolate the default HOME scan. Never run bare \`sdtk usage\` in the operator environment. Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs. If no approved demo fixture is available, block the task before capture. Before completion, write only approved DEMO capture assets and a SHA-256 manifest into the canonical artifact directory supplied in the native worker request; do not leave the only evidence in a Kanban scratch workspace. Do not fabricate UI, render final video, publish, or approve. ${shared}`;
     case 'episode_render':
       return `Render the owner-approved ${identity} video from real captures and the approved script package. Run the established sdtk-marketing video-quality checks and record factual pass/fail evidence, output paths, dimensions, duration, audio evidence, and SHA-256. Stop at render/review; do not publish. ${shared}`;
     case 'social_package':
@@ -83,10 +84,8 @@ function role(profile, runtime, options = {}) {
       backend: 'kanban-cli',
       profile,
       hermes_bin: HERMES_BIN,
-      env: {
-        HERMES_HOME: `${HERMES_PROFILE_BASE}/${profile}`,
-        HERMES_KANBAN_HOME: `${HERMES_PROFILE_BASE}/${profile}`,
-      },
+      // The adapter resolves cards from the dispatcher board; --assignee routes the worker profile.
+      env: { HERMES_HOME: HERMES_DISPATCH_HOME },
       board: runtime.board,
       live_ack: true,
       cancel_action: runtime.cancel_action,
