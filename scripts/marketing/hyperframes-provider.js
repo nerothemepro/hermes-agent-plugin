@@ -43,7 +43,7 @@ function providerRoot(ledger) {
 }
 
 function runHyperframes(argv, cwd) {
-  const result = spawnSync('npx', ['--no-install', 'hyperframes', ...argv], {
+  const result = spawnSync('hyperframes', argv, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],

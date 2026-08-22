@@ -22,8 +22,8 @@ fs.writeFileSync(path.join(provider, 'snapshot-times.json'), JSON.stringify({
   source_sha256: sha,
   scenes: [{ scene_id: 'SC01', times: { entry: 0, representative: 1.5, final: 3 } }],
 }));
-const fakeNpx = path.join(binDir, 'npx');
-fs.writeFileSync(fakeNpx, String.raw`#!/usr/bin/env node
+const fakeHyperframes = path.join(binDir, 'hyperframes');
+fs.writeFileSync(fakeHyperframes, String.raw`#!/usr/bin/env node
 const fs=require('fs'); const path=require('path');
 const args=process.argv.slice(2);
 if (args.includes('--version')) { process.stdout.write('hyperframes 0.8.8\\n'); process.exit(0); }
@@ -34,7 +34,7 @@ process.exit(0);
 `, { mode: 0o755 });
 
 function run(args, extra = {}) {
-  return execFileSync('node', [wrapper, ...args], { encoding: 'utf8', env: { ...process.env, ...extra, PATH: binDir + path.delimiter + process.env.PATH } });
+  return execFileSync('node', [wrapper, ...args], { encoding: 'utf8', env: { ...process.env, ...extra, HOME: temp, PATH: binDir + path.delimiter + '/usr/local/bin' + path.delimiter + '/usr/bin' } });
 }
 const doctor = JSON.parse(run(['doctor']));
 assert.equal(doctor.requirements.shm, true);
