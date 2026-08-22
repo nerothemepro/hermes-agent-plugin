@@ -31,6 +31,15 @@ function inside(root, file) {
 }
 
 function loadPlaywright() {
+  const modulePath = process.env.SDTK_MARKETING_PLAYWRIGHT_MODULE;
+  if (modulePath) {
+    if (!path.isAbsolute(modulePath)) throw new Error('Playwright module path must be absolute');
+    const packageFile = path.join(modulePath, 'package.json');
+    if (!fs.existsSync(packageFile)) throw new Error('Playwright module package.json is unavailable');
+    const packageMetadata = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+    if (packageMetadata.name !== 'playwright') throw new Error('configured Playwright module has an unexpected package name');
+    return require(modulePath);
+  }
   const project = process.env.SDTK_MARKETING_PLAYWRIGHT_PROJECT
     || path.resolve(__dirname, '../../media-pipeline/remotion/sdtk-tutorial');
   const packageFile = path.join(project, 'package.json');
@@ -108,4 +117,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((error) => fail(error.message || String(error)));
-module.exports = { main, revealCommand };
+module.exports = { loadPlaywright, main, revealCommand };
