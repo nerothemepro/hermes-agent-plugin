@@ -14,7 +14,7 @@ export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_SNAPSHOT='node /workspace/hermes-age
 export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_CHECK='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js check --project {project} --source-sha256 {source_sha256} --snapshots {snapshots}'
 ~~~
 
-The ledger project must contain provider/hyperframes/index.html. The adapter uses npx --no-install hyperframes; it never installs or upgrades a package.
+The ledger project must contain provider/hyperframes/index.html. Install the exact approved HyperFrames CLI globally before use (for example `npm install -g hyperframes@0.8.8`); the adapter invokes the `hyperframes` binary directly from the restricted PATH and never installs or upgrades it at runtime.
 
 ## Preflight
 
