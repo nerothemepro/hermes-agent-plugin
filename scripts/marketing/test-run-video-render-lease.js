@@ -44,5 +44,19 @@ try {
 }
 assert.equal(missing, true);
 
+for (const [name, failedPhase] of [
+  ['SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD', 'unload_local_llm'],
+  ['SDTK_MARKETING_RENDER_LEASE_RENDER_CMD', 'render'],
+]) {
+  let failure;
+  try {
+    execFileSync('bash', [script, '--lease', lease], { env: { ...env, [name]: 'false' }, encoding: 'utf8', stdio: 'pipe' });
+  } catch (error) {
+    failure = JSON.parse(error.stdout);
+  }
+  assert.equal(failure.status, 'failed');
+  assert.equal(failure.failed_phase, failedPhase);
+}
+
 fs.rmSync(temp, { recursive: true, force: true });
 console.log('ok - bounded operator render lease wrapper');

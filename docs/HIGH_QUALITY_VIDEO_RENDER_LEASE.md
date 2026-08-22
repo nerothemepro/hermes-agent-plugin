@@ -14,7 +14,7 @@ state for the HyperFrames provider. It does not accept a render command from the
 
 Operator configuration is runtime-only and must remain outside Git:
 
-- `SDTK_MARKETING_RENDER_LEASE_VERIFY_EVIDENCE_CMD
+- `SDTK_MARKETING_RENDER_LEASE_VERIFY_EVIDENCE_CMD`
 - `SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD`
 - `SDTK_MARKETING_RENDER_LEASE_FREE_CACHE_CMD`
 - `SDTK_MARKETING_RENDER_LEASE_RENDER_CMD`
@@ -27,6 +27,16 @@ Each command may use `{lease}` and `{out}`. The wrapper runs them strictly in th
 3. free renderer cache;
 4. render exactly one approved output;
 5. bank output and intermediate frames.
+
+The machine-local implementation is `scripts/marketing/render-lease-local-operator.py`. It accepts only the canonical project lease, local credential-free LM Studio/ComfyUI endpoints, an MP4 under the configured review root, and a fixed HyperFrames argv. LM Studio unload follows the local REST `POST /api/v1/models/unload` contract and never records instance IDs.
+
+Deploy the five runtime command bindings with:
+
+```bash
+bash scripts/deploy_marketing_render_lease_operator.sh
+```
+
+The deployment backs up `mkt-digest.env`, preserves mode `0600`, runs both operator test suites, and does not restart services or delete prior backups.
 
 The JSON receipt contains only state, project ID, output reference, action names, and failed phase.
 It never emits commands, credentials, endpoint values, process IDs, or model-instance IDs. The wrapper
