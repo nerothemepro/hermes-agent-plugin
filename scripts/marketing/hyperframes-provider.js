@@ -11,6 +11,9 @@ const SHA256 = /^[a-f0-9]{64}$/i;
 const PHASES = new Set(['entry', 'representative', 'final']);
 const SESSION_FILE = path.join('.sdtk-marketing', 'hyperframes-preview-session.json');
 const SNAPSHOT_PLAN_FILE = 'snapshot-times.json';
+const DEFAULT_TIMEOUT_MS = 30_000;
+// Chromium-backed inspection can exceed the control-command budget on software GPU.
+const FRAME_PRODUCTION_TIMEOUT_MS = 120_000;
 
 function die(message) {
   process.stderr.write('hyperframes provider: ' + message + '\n');
@@ -43,11 +46,14 @@ function providerRoot(ledger) {
 }
 
 function runHyperframes(argv, cwd) {
+  const timeout = ['check', 'snapshot'].includes(argv[0])
+    ? FRAME_PRODUCTION_TIMEOUT_MS
+    : DEFAULT_TIMEOUT_MS;
   const result = spawnSync('hyperframes', argv, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 30000,
+    timeout,
     maxBuffer: 1024 * 1024,
   });
   if (result.error) return { ok: false, status: result.status, stdout: result.stdout || '', stderr: result.stderr || '', error: result.error.message };
