@@ -54,3 +54,14 @@ export SDTK_MARKETING_VIDEO_LMSTUDIO_STRUCTURED_MODELS='qwen-local,gemma-local'
 ~~~
 
 The doctor performs only GET /v1/models. A model appears as structured-output capable only when it is both allowlisted and explicitly configured in SDTK_MARKETING_VIDEO_LMSTUDIO_STRUCTURED_MODELS. This is an operator assertion; the first owner-approved scene task remains the actual conformance proof. The executor accepts one SHA-approved task, issues one request with JSON Schema, returns at most one advisory provider fragment, rejects URLs, shell/process source, unsafe paths, unknown media, claims/CTA changes, and never applies, renders, or publishes the fragment.
+
+### LM Studio Grammar Compatibility
+
+Some LM Studio model backends reject nested JSON-Schema grammars and place a successful
+schema-constrained reply in `reasoning_content` rather than `content`. The bounded executor
+therefore asks the model for a flat proposal containing only `motion_id`, `source_fragment`, and
+`approved_media_ids_csv`. It then constructs the canonical result itself, binding the exact task SHA,
+scene ID, operation, model ID, and validated allowlisted media IDs. This is not a relaxed result contract:
+any unknown field, unsafe source, duplicate media ID, unapproved motion, or unapproved media ID is rejected
+before a fragment can be recorded. The compatibility path must be proven by one local structured-output probe
+for each explicitly allowlisted model before it is selected for an attended scene task.
