@@ -32,6 +32,7 @@ const args=process.argv.slice(2);
 if (args.includes('--version')) { process.stdout.write('hyperframes 0.8.8\\n'); process.exit(0); }
 if (args.includes('doctor')) { process.stdout.write(JSON.stringify({ok:process.env.SHM_OK !== 'false',checks:[{name:'Node.js',ok:true},{name:'Chrome',ok:true},{name:'FFmpeg',ok:true},{name:'/dev/shm',ok:process.env.SHM_OK !== 'false',detail:'512 MB'}]})); process.exit(0); }
 if (args.includes('snapshot')) { const out=args[args.indexOf('--output')+1]; fs.mkdirSync(out,{recursive:true}); fs.writeFileSync(path.join(out,'frame.png'),'real-pixels'); process.exit(0); }
+if (args.includes('preview')) { if (args.includes('--background')) { fs.writeFileSync(process.env.PREVIEW_STARTED, 'started'); process.exit(0); } if (args.includes('--status')) { process.stdout.write(JSON.stringify({result:{state:'not-running'}})); process.exit(0); } if (args.includes('--stop')) process.exit(0); }
 if (args.includes('check')) { if(process.env.CHECK_FAIL==='true') process.stdout.write(JSON.stringify({ok:false,layout:{errors:[{code:'content_overlap',message:'title covers product'}]}})); else process.stdout.write(JSON.stringify({ok:true,layout:{errors:[]}})); process.exit(process.env.CHECK_FAIL==='true'?1:0); }
 process.exit(0);
 `, { mode: 0o755 });
@@ -48,6 +49,14 @@ const snapshot = JSON.parse(run(['snapshot', '--project', ledger, '--scene', 'SC
 assert.equal(snapshot.path, 'production/evidence/snapshots/SC01/representative.png');
 const snapshotPath = path.join(ledger, snapshot.path);
 assert.equal(snapshot.sha256, crypto.createHash('sha256').update(fs.readFileSync(snapshotPath)).digest('hex'));
+const previewMarker = path.join(temp, 'preview-started');
+try {
+  run(['preview', '--project', ledger, '--mode', 'timeline', '--port', '4314'], { PREVIEW_STARTED: previewMarker });
+  assert.fail('preview without a local HTTP session must fail closed');
+} catch (error) {
+  assert.equal(error.status, 2);
+}
+assert.equal(fs.readFileSync(previewMarker, 'utf8'), 'started');
 const check = JSON.parse(run(['check', '--project', ledger, '--source-sha256', sha]));
 assert.deepEqual(check.findings, []);
 const failedCheck = JSON.parse(run(['check', '--project', ledger, '--source-sha256', sha], { CHECK_FAIL: 'true' }));

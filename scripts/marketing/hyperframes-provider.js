@@ -100,6 +100,10 @@ function writeSession(ledger, session) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(session, null, 2) + '\n', { mode: 0o600 });
 }
+function previewIsRunning(result) {
+  if (!result.ok) return false;
+  try { return JSON.parse(result.stdout).result?.state === 'running'; } catch { return false; }
+}
 function listenPid(status) {
   const visit = (value) => {
     if (!value || typeof value !== 'object') return null;
@@ -139,7 +143,7 @@ async function preview(flags) {
   const root = providerRoot(ledger);
   if (readSession(ledger)) die('an owned preview session already exists; stop it explicitly first');
   const existing = runHyperframes(['preview', root, '--status', '--json'], root);
-  if (existing.ok) die('a preview session already exists without this ledger ownership record; no process was touched');
+  if (previewIsRunning(existing)) die('a preview session already exists without this ledger ownership record; no process was touched');
   const start = runHyperframes(['preview', root, '--background', '--port', String(port), '--no-open'], root);
   if (!start.ok) die('preview did not start');
   const statusResult = runHyperframes(['preview', root, '--status', '--json'], root);
