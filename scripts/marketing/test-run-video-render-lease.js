@@ -22,9 +22,11 @@ fs.writeFileSync(lease, JSON.stringify({
 
 const env = {
   ...process.env,
+  SDTK_MARKETING_RENDER_LEASE_VERIFY_EVIDENCE_CMD: 'true',
   SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD: 'true',
   SDTK_MARKETING_RENDER_LEASE_FREE_CACHE_CMD: 'true',
   SDTK_MARKETING_RENDER_LEASE_RENDER_CMD: 'true',
+  SDTK_MARKETING_RENDER_LEASE_BANK_OUTPUT_CMD: 'true',
 };
 const dry = execFileSync('bash', [script, '--lease', lease, '--dry-run'], { env, encoding: 'utf8' });
 assert.match(dry, /DRY_RUN phase=unload_local_llm/);

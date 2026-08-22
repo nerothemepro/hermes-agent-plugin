@@ -35,7 +35,7 @@ NODE
 project_id="${fields[0]}"
 out="${fields[1]}"
 
-for name in SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD SDTK_MARKETING_RENDER_LEASE_FREE_CACHE_CMD SDTK_MARKETING_RENDER_LEASE_RENDER_CMD; do
+for name in SDTK_MARKETING_RENDER_LEASE_VERIFY_EVIDENCE_CMD SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD SDTK_MARKETING_RENDER_LEASE_FREE_CACHE_CMD SDTK_MARKETING_RENDER_LEASE_RENDER_CMD SDTK_MARKETING_RENDER_LEASE_BANK_OUTPUT_CMD; do
   [[ -n "${!name:-}" ]] || { echo "render lease: $name is not configured; nothing started" >&2; exit 2; }
 done
 
@@ -59,9 +59,11 @@ run_phase() {
 
 status=completed
 failed_phase=''
-if ! run_phase unload_local_llm "$SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD"; then status=failed; failed_phase=unload_local_llm; fi
+if ! run_phase verify_persisted_evidence "$SDTK_MARKETING_RENDER_LEASE_VERIFY_EVIDENCE_CMD"; then status=failed; failed_phase=verify_persisted_evidence; fi
+if [[ "$status" == completed ]] && ! run_phase unload_local_llm "$SDTK_MARKETING_RENDER_LEASE_UNLOAD_LLM_CMD"; then status=failed; failed_phase=unload_local_llm; fi
 if [[ "$status" == completed ]] && ! run_phase free_renderer_cache "$SDTK_MARKETING_RENDER_LEASE_FREE_CACHE_CMD"; then status=failed; failed_phase=free_renderer_cache; fi
 if [[ "$status" == completed ]] && ! run_phase render "$SDTK_MARKETING_RENDER_LEASE_RENDER_CMD"; then status=failed; failed_phase=render; fi
+if [[ "$status" == completed ]] && ! run_phase bank_output_and_frames "$SDTK_MARKETING_RENDER_LEASE_BANK_OUTPUT_CMD"; then status=failed; failed_phase=bank_output_and_frames; fi
 
 node - "$status" "$project_id" "$out" "$failed_phase" <<'NODE'
 const [status, projectId, outputReference, failedPhase] = process.argv.slice(2);
