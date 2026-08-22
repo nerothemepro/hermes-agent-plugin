@@ -41,3 +41,16 @@ Preview is local at 127.0.0.1, uses HyperFrames preview --background, verifies l
 ## Check Mapping
 
 The adapter runs hyperframes check --json --snapshots --frame-check. Any provider error becomes a blocking structured finding. Unknown errors remain blocking rather than being dropped.
+
+## LM Studio Scene Executor
+
+The same runtime env may configure the bounded local executor:
+
+~~~bash
+export SDTK_MARKETING_VIDEO_AGENT_LMSTUDIO_DOCTOR_CMD='python3 /workspace/hermes-agent-plugin/scripts/marketing/lmstudio-scene-executor.py --doctor'
+export SDTK_MARKETING_VIDEO_AGENT_LMSTUDIO_EXECUTE_CMD='python3 /workspace/hermes-agent-plugin/scripts/marketing/lmstudio-scene-executor.py --task {task} --model {model}'
+export SDTK_MARKETING_VIDEO_LOCAL_MODELS='qwen-local,gemma-local'
+export SDTK_MARKETING_VIDEO_LMSTUDIO_STRUCTURED_MODELS='qwen-local,gemma-local'
+~~~
+
+The doctor performs only GET /v1/models. A model appears as structured-output capable only when it is both allowlisted and explicitly configured in SDTK_MARKETING_VIDEO_LMSTUDIO_STRUCTURED_MODELS. This is an operator assertion; the first owner-approved scene task remains the actual conformance proof. The executor accepts one SHA-approved task, issues one request with JSON Schema, returns at most one advisory provider fragment, rejects URLs, shell/process source, unsafe paths, unknown media, claims/CTA changes, and never applies, renders, or publishes the fragment.
