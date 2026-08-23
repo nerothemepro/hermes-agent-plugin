@@ -26,6 +26,8 @@ function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
   const preview = JSON.parse(execFileSync('node', [wrapper, 'preview', '--project', ledger, '--mode', 'timeline', '--port', String(port), '--tunnel', 'true'], { env, encoding: 'utf8' }));
   assert.equal(preview.tunnel.public_url, 'https://orange-field-123.trycloudflare.com');
   assert.ok(preview.tunnel.pid > 0);
+  await wait(200);
+  process.kill(preview.tunnel.pid, 0);
   const stopped = JSON.parse(execFileSync('node', [wrapper, 'stop', '--project', ledger, '--session-id', preview.session_id, '--pid', String(preview.pid), '--ownership-token', preview.ownership_token, '--tunnel-pid', String(preview.tunnel.pid), '--tunnel-ownership-token', preview.tunnel.ownership_token], { env, encoding: 'utf8' }));
   assert.equal(stopped.tunnel_stopped, true);
   await wait(150);

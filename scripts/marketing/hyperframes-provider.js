@@ -159,6 +159,9 @@ function quickTunnelUrl(text) {
 }
 async function stopTunnel(tunnel) {
   if (!tunnel || !Number.isInteger(tunnel.pid) || tunnel.pid <= 0 || typeof tunnel.ownership_token !== 'string') return false;
+  // A tunnel that has already exited needs no signal. A live process still must
+  // prove its cloudflared ownership before this provider may stop it.
+  try { process.kill(tunnel.pid, 0); } catch { return true; }
   if (!ownsTunnelProcess(tunnel.pid)) return false;
   try { process.kill(tunnel.pid, 'SIGTERM'); } catch { return false; }
   const deadline = Date.now() + TUNNEL_STOP_TIMEOUT_MS;
@@ -171,21 +174,24 @@ async function stopTunnel(tunnel) {
 async function startTunnel(port, ledger) {
   const available = spawnSync('cloudflared', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 });
   if (available.error || available.status !== 0) throw new Error('cloudflared is unavailable; install it in the operator environment before using --tunnel');
-  const child = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:' + port], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Redirect detached cloudflared logs to a file rather than Node pipes. When this
+  // command exits, closing inherited pipes can deliver SIGPIPE to cloudflared and
+  // kill an otherwise healthy Quick Tunnel.
+  const logFile = tunnelLogPath(ledger);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, '', { mode: 0o600 });
+  const logFd = fs.openSync(logFile, 'a', 0o600);
+  const child = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:' + port], { detached: true, stdio: ['ignore', logFd, logFd] });
+  fs.closeSync(logFd);
   if (!Number.isInteger(child.pid) || child.pid <= 0) throw new Error('cloudflared did not return a tunnel PID');
-  let output = '';
   let spawnError = null;
   child.on('error', (error) => { spawnError = error; });
-  const onData = (chunk) => { output += String(chunk); appendTunnelLog(ledger, chunk); };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
   const deadline = Date.now() + TUNNEL_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
+    let output = '';
+    try { output = fs.readFileSync(logFile, 'utf8'); } catch {}
     const publicUrl = quickTunnelUrl(output);
     if (publicUrl && ownsTunnelProcess(child.pid)) {
-      // Detached tunnel logs must not keep this control command's Node event loop alive.
-      child.stdout.destroy();
-      child.stderr.destroy();
       child.unref();
       return { public_url: publicUrl, pid: child.pid, started_at: new Date().toISOString(), ownership_token: crypto.randomBytes(24).toString('hex') };
     }
