@@ -1,6 +1,6 @@
 # Local HyperFrames Provider Adapter
 
-This operator-owned adapter provides the local-only delegates expected by sdtk-marketing-kit. It never uses a tunnel, cloud render, remote asset import, social publish, or credentials.
+This operator-owned adapter provides the local delegates expected by sdtk-marketing-kit. It never uses cloud render, remote asset import, social publish, named Cloudflare hostnames, or Cloudflare account credentials. A temporary Quick Tunnel is available only when an owner explicitly supplies `--tunnel`.
 
 ## Runtime Setup
 
@@ -8,8 +8,8 @@ Keep these values in the operator's 0600 runtime environment. Do not place value
 
 ~~~bash
 export SDTK_MARKETING_VIDEO_PROVIDER_HYPERFRAMES_DOCTOR_CMD='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js doctor'
-export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_PREVIEW='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js preview --project {project} --mode {mode} --port {port}'
-export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_PREVIEW_STOP='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js stop --project {project} --session-id {session_id} --pid {pid} --ownership-token {ownership_token}'
+export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_PREVIEW='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js preview --project {project} --mode {mode} --port {port} --tunnel {tunnel}'
+export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_PREVIEW_STOP='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js stop --project {project} --session-id {session_id} --pid {pid} --ownership-token {ownership_token} --tunnel-pid {tunnel_pid} --tunnel-ownership-token {tunnel_ownership_token}'
 export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_SNAPSHOT='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js snapshot --project {project} --scene {scene} --phase {phase} --source-sha256 {source_sha256}'
 export SDTK_MARKETING_VIDEO_CMD_HYPERFRAMES_CHECK='node /workspace/hermes-agent-plugin/scripts/marketing/hyperframes-provider.js check --project {project} --source-sha256 {source_sha256} --snapshots {snapshots}'
 ~~~
@@ -37,6 +37,12 @@ The adapter captures the exact requested timestamp, writes production/evidence/s
 ## Preview Ownership
 
 Preview is local at 127.0.0.1, uses HyperFrames preview --background, verifies local HTTP availability, and stores an ownership token outside composition source. Stop requires the exact session ID, PID, and ownership token. The wrapper never calls --kill-all.
+
+## Owner-Authorized Quick Tunnel
+
+`--tunnel true` is the only path that calls `cloudflared`. The adapter requires an already-installed `cloudflared` binary, starts `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port>`, accepts only an HTTPS `*.trycloudflare.com` URL, and stores the public URL, PID, timestamp, and random ownership token in the local `0600` preview session. It never auto-downloads Cloudflare software, logs credentials, creates a named hostname, or starts a tunnel implicitly.
+
+On stop, the adapter verifies the exact tunnel PID and `/proc/<pid>/cmdline` ownership before sending SIGTERM. Tunnel stop is required before preview stop and session deletion. Any missing receipt field, invalid public URL, PID mismatch, or stop failure is fail-closed and preserves the session record for investigation.
 
 ## Check Mapping
 
