@@ -5,13 +5,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const SHA256 = /^[a-f0-9]{64}$/i;
 const PHASES = new Set(['entry', 'representative', 'final']);
 const SESSION_FILE = path.join('.sdtk-marketing', 'hyperframes-preview-session.json');
 const SNAPSHOT_PLAN_FILE = 'snapshot-times.json';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const TUNNEL_READY_TIMEOUT_MS = 20_000;
+const TUNNEL_STOP_TIMEOUT_MS = 5_000;
+const QUICK_TUNNEL_URL = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com\/?$/i;
 // Chromium-backed inspection can exceed the control-command budget on software GPU.
 const FRAME_PRODUCTION_TIMEOUT_MS = 120_000;
 
@@ -134,6 +137,65 @@ function waitForLocalHttp(port) {
   });
 }
 
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function isTunnelRequested(value) { return value === 'true'; }
+function commandLineFor(pid) {
+  try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').replace(/\0/g, ' '); } catch { return ''; }
+}
+function ownsTunnelProcess(pid) {
+  const line = commandLineFor(pid);
+  return line.includes('cloudflared') && line.includes('tunnel') && line.includes('--url');
+}
+function tunnelLogPath(ledger) { return path.join(ledger, '.sdtk-marketing', 'hyperframes-tunnel.log'); }
+function appendTunnelLog(ledger, chunk) {
+  const file = tunnelLogPath(ledger);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, String(chunk), { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch {}
+}
+function quickTunnelUrl(text) {
+  const match = String(text).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\/?/i);
+  return match && QUICK_TUNNEL_URL.test(match[0]) ? match[0] : null;
+}
+async function stopTunnel(tunnel) {
+  if (!tunnel || !Number.isInteger(tunnel.pid) || tunnel.pid <= 0 || typeof tunnel.ownership_token !== 'string') return false;
+  if (!ownsTunnelProcess(tunnel.pid)) return false;
+  try { process.kill(tunnel.pid, 'SIGTERM'); } catch { return false; }
+  const deadline = Date.now() + TUNNEL_STOP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try { process.kill(tunnel.pid, 0); } catch { return true; }
+    await sleep(100);
+  }
+  return false;
+}
+async function startTunnel(port, ledger) {
+  const available = spawnSync('cloudflared', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 });
+  if (available.error || available.status !== 0) throw new Error('cloudflared is unavailable; install it in the operator environment before using --tunnel');
+  const child = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:' + port], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!Number.isInteger(child.pid) || child.pid <= 0) throw new Error('cloudflared did not return a tunnel PID');
+  let output = '';
+  let spawnError = null;
+  child.on('error', (error) => { spawnError = error; });
+  const onData = (chunk) => { output += String(chunk); appendTunnelLog(ledger, chunk); };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  const deadline = Date.now() + TUNNEL_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const publicUrl = quickTunnelUrl(output);
+    if (publicUrl && ownsTunnelProcess(child.pid)) {
+      // Detached tunnel logs must not keep this control command's Node event loop alive.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+      return { public_url: publicUrl, pid: child.pid, started_at: new Date().toISOString(), ownership_token: crypto.randomBytes(24).toString('hex') };
+    }
+    if (spawnError || child.exitCode !== null) break;
+    await sleep(100);
+  }
+  try { process.kill(child.pid, 'SIGTERM'); } catch {}
+  throw new Error(spawnError ? 'cloudflared failed to start; preview was not exposed' : 'cloudflared did not provide an owned Quick Tunnel URL; preview was not exposed');
+}
+
 async function preview(flags) {
   if (!validProject(flags.project)) die('project must be an existing absolute ledger directory');
   if (!['storyboard', 'timeline'].includes(flags.mode)) die('mode must be storyboard or timeline');
@@ -157,6 +219,14 @@ async function preview(flags) {
     runHyperframes(['preview', root, '--stop'], root);
     die('preview did not provide an owned local HTTP session; session was stopped');
   }
+  let tunnel = null;
+  if (isTunnelRequested(flags.tunnel)) {
+    try { tunnel = await startTunnel(port, ledger); }
+    catch (error) {
+      runHyperframes(['preview', root, '--stop'], root);
+      die(error && error.message ? error.message : 'cloudflared tunnel failed; preview was stopped');
+    }
+  }
   const session = {
     session_id: 'hf-' + crypto.randomUUID(),
     ownership_token: crypto.randomBytes(24).toString('hex'),
@@ -164,6 +234,7 @@ async function preview(flags) {
     port,
     started_at: new Date().toISOString(),
     provider_root: root,
+    tunnel,
   };
   writeSession(ledger, session);
   process.stdout.write(JSON.stringify({
@@ -172,22 +243,26 @@ async function preview(flags) {
   }, null, 2) + '\n');
 }
 
-function stop(flags) {
+async function stop(flags) {
   if (!validProject(flags.project)) die('project must be an existing absolute ledger directory');
   const ledger = path.resolve(flags.project);
   const session = readSession(ledger);
   if (!session || session.session_id !== flags['session-id'] || session.ownership_token !== flags['ownership-token'] || String(session.pid) !== String(flags.pid)) {
     die('session ownership does not match; no process was touched');
   }
+  if (session.tunnel && (String(session.tunnel.pid) !== String(flags['tunnel-pid']) || session.tunnel.ownership_token !== flags['tunnel-ownership-token'])) {
+    die('tunnel ownership does not match; no process was touched');
+  }
   const root = providerRoot(ledger);
   const current = runHyperframes(['preview', root, '--status', '--json'], root);
   if (!current.ok || listenPid(readJson(current.stdout, 'preview status')) !== session.pid) {
     die('active preview ownership cannot be proven; session remains recorded');
   }
+  if (session.tunnel && !await stopTunnel(session.tunnel)) die('active tunnel ownership cannot be proven or tunnel did not stop; preview remains recorded');
   const result = runHyperframes(['preview', root, '--stop'], root);
   if (!result.ok) die('HyperFrames rejected preview stop; session remains recorded');
   fs.unlinkSync(sessionPath(ledger));
-  process.stdout.write(JSON.stringify({ stopped: true, session_id: session.session_id, ownership_token: session.ownership_token }) + '\n');
+  process.stdout.write(JSON.stringify({ stopped: true, session_id: session.session_id, ownership_token: session.ownership_token, tunnel_stopped: Boolean(session.tunnel), tunnel_ownership_token: session.tunnel ? session.tunnel.ownership_token : null }) + '\n');
 }
 
 function plan(ledger, sourceSha) {
@@ -289,7 +364,7 @@ function check(flags) {
   const { action, flags } = args(process.argv.slice(2));
   if (action === 'doctor') return doctor();
   if (action === 'preview') return preview(flags);
-  if (action === 'stop') return stop(flags);
+  if (action === 'stop') return await stop(flags);
   if (action === 'snapshot') return snapshot(flags);
   if (action === 'check') return check(flags);
   die('usage: hyperframes-provider.js <doctor|preview|stop|snapshot|check>');
