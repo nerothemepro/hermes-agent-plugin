@@ -90,7 +90,7 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.match(preview.workflow.stages.find((stage) => stage.id === 'episode_lessons').params.instruction, /project-local SDTK-WIKI/);
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
   assert.strictEqual(preview.cost_band, 'medium');
-  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /What Is Your AI Coding Actually Costing/);
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /See Your Real AI Cost in One Command/);
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"episode":"EP5"}', { templateRoot: TEMPLATE_ROOT }), /Invalid episode/);
 });
 
@@ -114,11 +114,19 @@ test('EP2 product capture is constrained to a labelled local demo fixture', () =
   assert.match(capture, /Never run bare/);
 });
 
-test('marketing video dogfood manifest resolves an allowlisted EP3 without freeform instructions', () => {
+test('marketing video episode manifest resolves the accepted EP3 Second Brain story', () => {
   const preview = previewTemplate('marketing_video_ep_usage', '{"episode":"EP3"}', { templateRoot: TEMPLATE_ROOT });
   assert.strictEqual(preview.params.episode, 'EP3');
-  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /From Client Comment to a Precise Patch/);
-  assert.match(preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction, /Preview Studio/);
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /Build a Local Second Brain for an Agent/);
+  assert.match(preview.workflow.stages.find((stage) => stage.id === 'product_capture').params.instruction, /sdtk-brain/);
+  assert.match(preview.episode_manifest_sha256, /^[a-f0-9]{64}$/);
+  assert.strictEqual(preview.episode_manifest.episode_id, 'EP3');
+  assert.strictEqual(preview.episode_manifest.revision, 'r1');
+  const render = preview.workflow.stages.find((stage) => stage.id === 'episode_render').params.instruction;
+  assert.match(render, /sdtk-brain/);
+  assert.match(render, /local LM Studio/i);
+  assert.doesNotMatch(render, /exact approved sdtk usage argv/);
+
 });
 
 test('EP2 runtime map uses the shared dispatcher board while preserving each assignee profile', () => {
@@ -138,5 +146,18 @@ test('EP2 runtime map uses the shared dispatcher board while preserving each ass
     assert.strictEqual(preview.runtime_map.roles[role].config.env.HERMES_HOME, '/opt/data/hermes');
     assert.ok(!Object.prototype.hasOwnProperty.call(preview.runtime_map.roles[role].config.env, 'HERMES_KANBAN_HOME'));
     assert.strictEqual(preview.runtime_map.roles[role].config.preflight_timeout_ms, 30000);
+  }
+});
+
+test('marketing workflow freezes episode identity and manifest SHA into every worker task', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', { episode: 'EP3' }, {
+    templateRoot: path.join(__dirname, '..', 'control-plane', 'templates'),
+  });
+  const workerTasks = preview.workflow.stages.filter((stage) => stage.type === 'task');
+  assert.ok(workerTasks.length > 0);
+  for (const stage of workerTasks) {
+    assert.equal(stage.params.episode_id, 'EP3');
+    assert.equal(stage.params.episode_revision, 'r1');
+    assert.equal(stage.params.episode_manifest_sha256, preview.episode_manifest_sha256);
   }
 });

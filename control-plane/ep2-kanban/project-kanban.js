@@ -7,14 +7,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const { isTerminalRunStatus } = require('../../src/runStatus');
+const { projectTaskStatus, selectActiveRun } = require('../video-self-service/normalized-state');
 
 const DEFAULT_FEATURE_KEY = 'HCP_MARKETING_VIDEO_EP_USAGE';
 const DEFAULT_MANIFEST = path.join(__dirname, 'marketing-video-series.json');
 const BACKLOG_STATUSES = new Set(['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE']);
-const ACTIVE_STATUSES = new Set(['running', 'submitted', 'running_external', 'waiting_external_evidence']);
-const DONE_STATUSES = new Set(['completed', 'skipped']);
-const PENDING_STATUSES = new Set(['waiting_for_approval', 'blocked', 'failed', 'cancelled', 'timed_out', 'timeout']);
 
 const TASK_LABELS = Object.freeze({
   research_evidence: 'Research evidence',
@@ -44,16 +41,7 @@ const ROLE_LABELS = Object.freeze({
 });
 
 function statusProjection(rawStatus) {
-  const status = String(rawStatus || '').trim();
-  if (status === 'created') return { status: 'TODO', reason: '' };
-  if (ACTIVE_STATUSES.has(status)) return { status: 'IN_PROGRESS', reason: '' };
-  if (DONE_STATUSES.has(status)) return { status: 'DONE', reason: '' };
-  if (status === 'waiting_for_approval') return { status: 'IN_REVIEW', reason: 'awaiting owner approval' };
-  if (status === 'waiting_for_dependency') return { status: 'PENDING', reason: '' };
-  if (['blocked', 'failed', 'cancelled', 'timed_out', 'timeout'].includes(status)) {
-    return { status: 'BLOCKED', reason: `ledger status: ${status}` };
-  }
-  return { status: 'PENDING', reason: `unknown ledger status: ${status || 'missing'}` };
+  return projectTaskStatus(rawStatus);
 }
 
 function safeText(value, fallback = '') {
@@ -148,9 +136,9 @@ function listRuns(projectPath) {
 
 function selectRun(runs, featureKey = DEFAULT_FEATURE_KEY) {
   const matches = (runs || []).filter((run) => run.feature_key === featureKey);
-  const active = matches.filter((run) => !isTerminalRunStatus(run.status));
-  const candidates = active.length ? active : matches;
-  return candidates.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+  const active = selectActiveRun(matches);
+  if (active) return active;
+  return matches.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))[0] || null;
 }
 
 function taskLabel(taskId) {

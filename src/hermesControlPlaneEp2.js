@@ -1,7 +1,7 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
+const { DEFAULT_EPISODE_ROOT, loadEpisodeManifest } = require('../control-plane/video-self-service/episode-manifest');
 
 const EP2_TEMPLATE_ID = 'marketing_video_ep_usage';
 const EP2_PROFILES = ['herresearch', 'herwiki', 'herorches', 'herdev', 'hervid', 'hersocial'];
@@ -10,16 +10,21 @@ const HERMES_PROFILE_BASE = '/opt/data/hermes-profiles';
 const HERMES_DISPATCH_HOME = '/opt/data/hermes';
 const DEFAULT_SERIES_MANIFEST = path.join(__dirname, '..', 'control-plane', 'ep2-kanban', 'marketing-video-series.json');
 
-function loadEpisodeSpec(episodeId = 'EP2', manifestPath = DEFAULT_SERIES_MANIFEST) {
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  if (manifest.schema_version !== 'hermes.marketing-video-series.v1' || !Array.isArray(manifest.episodes)) {
-    throw new Error('Marketing video series manifest is invalid.');
-  }
-  const episode = manifest.episodes.find((entry) => entry.episode === episodeId);
-  if (!episode || !episode.dogfood || !episode.dogfood.pain_point || !episode.dogfood.product_proof || !episode.dogfood.cta) {
-    throw new Error(`Episode ${episodeId} is not enabled for controller-led dogfood.`);
-  }
-  return episode;
+function loadEpisodeSpec(episodeId = 'EP2', manifestRoot = DEFAULT_EPISODE_ROOT) {
+  const loaded = loadEpisodeManifest(episodeId, { episodeManifestRoot: manifestRoot });
+  return {
+    episode: loaded.manifest.episode_id,
+    title: loaded.manifest.title,
+    dogfood: {
+      pain_point: loaded.manifest.pain_point,
+      product_proof: loaded.manifest.product_proof,
+      cta: loaded.manifest.cta,
+    },
+    episode_manifest: loaded.manifest,
+    episode_manifest_path: loaded.filePath,
+    episode_manifest_sha256: loaded.sha256,
+    capture_contract: loaded.manifest.capture_contract,
+  };
 }
 
 function task(id, role, instruction, depends_on = []) {
@@ -44,7 +49,7 @@ function instruction(stage, projectPath, episode) {
     case 'product_capture':
       return `Create only real, reproducible product-capture evidence for the owner-approved ${identity} script. Required product proof: ${episode.dogfood.product_proof} Use only a dedicated local DEMO DATA fixture visibly labelled DEMO DATA. The HOME environment must resolve inside that fixture for every usage command; --dir alone does not isolate the default HOME scan. Never run bare \`sdtk usage\` in the operator environment. Do not expose owner home paths, account names, model usage totals, rate-limit values, token values, credentials, or private IDs. If no approved demo fixture is available, block the task before capture. Before completion, write only approved DEMO capture assets and a SHA-256 manifest into the canonical artifact directory supplied in the native worker request; do not leave the only evidence in a Kanban scratch workspace. Do not fabricate UI, render final video, publish, or approve. ${shared}`;
     case 'episode_render':
-      return `Render the owner-approved ${identity} video from real captures and the approved script package. First run the governed capture plan with sdtk-marketing video terminal-capture run; its delegate must execute the exact approved sdtk usage argv commands in the isolated DEMO DATA fixture and record a Playwright terminal composite labelled COMPOSITED FROM REAL COMMAND OUTPUT. Do not substitute a legacy terminal recorder, stale capture, or prior tutorial composition. Build the final editorial composition with HyperFrames, preserving readable terminal evidence, narration, and the approved story duration. Run the established sdtk-marketing video-quality checks and record factual pass/fail evidence, output paths, dimensions, duration, audio evidence, and SHA-256. Stop at render/review; do not publish. ${shared}`;
+      return `Render the owner-approved ${identity} video from real captures and the approved script package. Capture contract (${episode.capture_contract.mode}): ${episode.capture_contract.instruction} Do not substitute a legacy recorder, stale capture, or another episode composition. Build the final editorial composition with HyperFrames, preserving readable terminal evidence, narration, and the approved story duration. Run the established sdtk-marketing video-quality checks and record factual pass/fail evidence, output paths, dimensions, duration, audio evidence, and SHA-256. Stop at render/review; do not publish. ${shared}`;
     case 'social_package':
       return `Prepare checked English YouTube, Facebook, and X payloads for ${identity} from the owner picture-locked script and rendered-video evidence. Use CTA ${episode.dogfood.cta}. Run sdtk-marketing checks and produce immutable approval packets. Do not upload, publish, approve, or alter any social account. ${shared}`;
     case 'lessons_record':
@@ -55,8 +60,8 @@ function instruction(stage, projectPath, episode) {
 }
 
 function buildEp2Workflow(projectPath, episodeId = 'EP2', options = {}) {
-  const episode = loadEpisodeSpec(episodeId, options.seriesManifestPath);
-  return {
+  const episode = loadEpisodeSpec(episodeId, options.episodeManifestRoot);
+  const workflow = {
     schema_version: 'sdtk.agent-workflow.v1',
     workflow_id: `hermes_marketing_video_${episode.episode.toLowerCase()}_r3`,
     stages: [
@@ -73,6 +78,16 @@ function buildEp2Workflow(projectPath, episodeId = 'EP2', options = {}) {
       { id: 'final_report', type: 'report', depends_on: ['lessons_record'], output: { path: 'reports/final_report.md' } },
     ],
   };
+  for (const stage of workflow.stages) {
+    if (stage.type === 'task') {
+      stage.params = Object.assign({}, stage.params, {
+        episode_id: episode.episode,
+        episode_revision: episode.episode_manifest.revision,
+        episode_manifest_sha256: episode.episode_manifest_sha256,
+      });
+    }
+  }
+  return workflow;
 }
 
 function role(profile, runtime, options = {}) {
@@ -112,4 +127,4 @@ function buildEp2RuntimeMap(runtime) {
   };
 }
 
-module.exports = { DEFAULT_SERIES_MANIFEST, EP2_PROFILES, EP2_TEMPLATE_ID, buildEp2RuntimeMap, buildEp2Workflow, loadEpisodeSpec };
+module.exports = { DEFAULT_EPISODE_ROOT, DEFAULT_SERIES_MANIFEST, EP2_PROFILES, EP2_TEMPLATE_ID, buildEp2RuntimeMap, buildEp2Workflow, loadEpisodeSpec };

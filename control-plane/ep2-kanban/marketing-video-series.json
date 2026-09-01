@@ -12,22 +12,22 @@
     {
       "backlog_id": "BK-39902",
       "episode": "EP2",
-      "title": "What Is Your AI Coding Actually Costing?",
+      "title": "See Your Real AI Cost in One Command",
       "status": "IN_PROGRESS",
       "dogfood": {
         "pain_point": "Solo founders and technical leads cannot reliably see AI coding usage and cost from one factual command.",
-        "product_proof": "Run the real sdtk usage command and show its factual terminal output without inferred savings or unsupported cost claims.",
+        "product_proof": "Run the real sdtk usage command against an isolated DEMO DATA fixture and show factual terminal output without inferred savings or unsupported cost claims.",
         "cta": "https://sdtk.dev/"
       }
     },
     {
       "backlog_id": "BK-39903",
       "episode": "EP3",
-      "title": "From Client Comment to a Precise Patch",
+      "title": "Build a Local Second Brain for an Agent",
       "status": "TODO",
       "dogfood": {
-        "pain_point": "Text-only feedback makes it hard for an AI coding agent to locate the exact UI element that needs correction.",
-        "product_proof": "Use the real sdtk-design Preview Studio flow to pin a visual comment, copy the generated prompt, and apply a precise patch.",
+        "pain_point": "Useful project knowledge is scattered across sources and must be rebuilt between agent sessions.",
+        "product_proof": "Use the real sdtk-brain workflow to initialize, ingest bounded sources, compile the vault, open the graph, search, and ask through local LM Studio with grounded citations.",
         "cta": "https://sdtk.dev/"
       }
     },

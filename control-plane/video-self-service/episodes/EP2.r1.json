@@ -1,0 +1,35 @@
+{
+  "schema_version": "sdtk.marketing-video-episode.v1",
+  "episode_id": "EP2",
+  "revision": "r1",
+  "title": "See Your Real AI Cost in One Command",
+  "language": "en",
+  "pain_point": "Solo founders and technical leads cannot reliably see AI coding usage and cost from one factual command.",
+  "story": "Show an isolated demo usage ledger, run the real sdtk usage command, and explain only values visible in the output.",
+  "product_proof": [
+    "Run the real sdtk usage command against an isolated DEMO DATA fixture and show its factual terminal output without inferred savings or unsupported cost claims."
+  ],
+  "source_boundaries": [
+    "Use a dedicated demo HOME and never expose operator usage telemetry."
+  ],
+  "cta": "https://sdtk.dev/",
+  "workflow_template": "marketing_video_episode_r1",
+  "quality_profile": "evidence_bound_explainer_r1",
+  "toolchain": {
+    "sdtk_marketing": "0.19.0",
+    "sdtk_agent": "0.5.4",
+    "hermes_adapter": "0.3.13"
+  },
+  "allowed_roles": [
+    "researcher",
+    "wiki",
+    "orchestrator",
+    "developer",
+    "video",
+    "social"
+  ],
+  "capture_contract": {
+    "mode": "terminal_usage_demo",
+    "instruction": "Run sdtk-marketing video terminal-capture run with the governed delegate and the exact approved sdtk usage argv in an isolated DEMO DATA fixture. Record a Playwright terminal composite labelled COMPOSITED FROM REAL COMMAND OUTPUT."
+  }
+}

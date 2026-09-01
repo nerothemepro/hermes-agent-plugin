@@ -34,7 +34,7 @@ class MonitorContractTests(unittest.TestCase):
         ledger = root / "ledger"
         ledger.mkdir()
         state = ledger / "state.json"
-        state.write_text(json.dumps({"status": "running" if status == "running_external" else status, "tasks": {"worker": {"status": status, "external_ids": {"hermes_task_id": "t_test"}}}}))
+        state.write_text(json.dumps({"run_id": "run_test", "status": "running" if status == "running_external" else status, "tasks": {"worker": {"status": status, "external_ids": {"hermes_task_id": "t_test"}}}}))
         (monitor.registry / "run_test.json").write_text(json.dumps({
             "run_id": "run_test",
             "state_path": str(state),
@@ -42,13 +42,21 @@ class MonitorContractTests(unittest.TestCase):
         }))
         return monitor
 
+    def test_observation_contains_shared_normalized_state(self):
+        monitor = self.make_monitor("completed")
+        with patch.object(monitor, "_infrastructure_checks", return_value={}):
+            observations = monitor.tick()
+        self.assertEqual(observations[1]["normalized"]["status"], "completed")
+        self.assertTrue(observations[1]["normalized"]["terminal"])
+
+
     def test_waiting_gate_notification_only_fires_after_transition(self):
         monitor = self.make_monitor("running_external")
         state_path = Path(next(iter(monitor._registry_records()))["state_path"])
         with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_run", return_value={"status": "running_external"}):
             monitor.tick()
             monitor.tick()
-        state_path.write_text(json.dumps({"status": "waiting_for_approval", "waiting_gate": "owner_review"}))
+        state_path.write_text(json.dumps({"run_id": "run_test", "status": "waiting_for_approval", "waiting_gate": "owner_review", "tasks": {"owner_review": {"type": "human_gate", "status": "waiting_for_approval"}}}))
         with patch.object(monitor, "_notify") as notify:
             monitor.tick()
         self.assertEqual(notify.call_count, 1)
@@ -98,6 +106,7 @@ class MonitorContractTests(unittest.TestCase):
         state_path = Path(record["state_path"])
         old = (datetime.now(timezone.utc) - timedelta(seconds=1200)).isoformat()
         state_path.write_text(json.dumps({
+            "run_id": "run_test",
             "status": "running",
             "tasks": {"episode_render": {
                 "status": "running_external", "role": "video", "last_heartbeat": old,
@@ -114,6 +123,7 @@ class MonitorContractTests(unittest.TestCase):
         monitor.bootstrap_path.write_text("ready\n")
         record = monitor._registry_records()[0]
         Path(record["state_path"]).write_text(json.dumps({
+            "run_id": "run_test",
             "status": "running",
             "tasks": {
                 "research_evidence": {"status": "running_external", "external_ids": {"hermes_task_id": "t_research"}},

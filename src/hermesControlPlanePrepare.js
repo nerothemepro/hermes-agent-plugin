@@ -15,7 +15,7 @@ const {
 
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
 
-function buildRegistryRecord(preview, runId, projectPath) {
+function buildRegistryRecord(preview, runId, projectPath, preflightPacket = null) {
   const runRoot = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId);
   return {
     schema_version: 'hermes.control-plane-run-reference.v1',
@@ -24,6 +24,11 @@ function buildRegistryRecord(preview, runId, projectPath) {
     template_version: preview.template_version,
     template_sha256: preview.template_sha256,
     template_variant: preview.params?.episode || null,
+    ...(preview.episode_manifest_sha256 ? {
+      episode_manifest_path: preview.episode_manifest_path,
+      episode_manifest_sha256: preview.episode_manifest_sha256,
+      ...(preflightPacket ? { preflight_sha256: preflightPacket.preflight_sha256 } : {}),
+    } : {}),
     ledger_path: runRoot,
     state_path: path.join(runRoot, 'state.json'),
     canonical_report_path: path.join(runRoot, 'reports', 'final_report.md'),
@@ -44,7 +49,8 @@ function findReusableEp2Record(registryDir, projectPath, preview = null) {
       if (preview && (
         record.template_version !== preview.template_version ||
         record.template_sha256 !== preview.template_sha256 ||
-        record.template_variant !== (preview.params?.episode || null)
+        record.template_variant !== (preview.params?.episode || null) ||
+        record.episode_manifest_sha256 !== (preview.episode_manifest_sha256 || undefined)
       )) continue;
       const expected = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', record.run_id, 'state.json');
       if (path.resolve(record.state_path || '') !== path.resolve(expected)) continue;
@@ -106,7 +112,7 @@ function prepareTemplate(templateId, rawParams, options = {}) {
     }
 
     fs.mkdirSync(registryDir, { recursive: true, mode: 0o700 });
-    const record = buildRegistryRecord(preview, started.run_id, projectPath);
+    const record = buildRegistryRecord(preview, started.run_id, projectPath, options.preflightPacket || null);
     const recordPath = path.join(registryDir, `${started.run_id}.json`);
     if (path.dirname(recordPath) !== registryDir) throw new Error('Unsafe registry path.');
     fs.writeFileSync(recordPath, JSON.stringify(record, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });

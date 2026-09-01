@@ -57,7 +57,10 @@ test('projector renders the ten-episode backlog and active pipeline without sens
   try {
     const result = projectKanban({ projectPath: root, runId: run.run_id, seriesManifestPath: SERIES_MANIFEST, now: new Date('2026-08-14T05:01:00.000Z') });
     assert.strictEqual(result.runId, run.run_id);
-    assert.match(fs.readFileSync(path.join(root, 'governance/ai/core/IMPROVEMENT_BACKLOG.md'), 'utf8'), /\| BK-39901 \| Stop Describing UI Bugs to AI \|/);
+
+    const backlog = fs.readFileSync(path.join(root, 'governance/ai/core/IMPROVEMENT_BACKLOG.md'), 'utf8');
+    assert.match(backlog, /\| BK-39901 \| Stop Describing UI Bugs to AI \|/);
+    assert.match(backlog, /\| BK-39903 \| Build a Local Second Brain for an Agent \|/);
     const planning = fs.readFileSync(path.join(root, 'SHARED_PLANNING.md'), 'utf8');
     assert.match(planning, /\| 1\. Research evidence \| IN_PROGRESS \| BA - HerResearch \|/);
     assert.match(planning, /\| 4\. Owner script review \| TODO \| Owner \|/);

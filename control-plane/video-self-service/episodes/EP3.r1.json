@@ -1,0 +1,41 @@
+{
+  "schema_version": "sdtk.marketing-video-episode.v1",
+  "episode_id": "EP3",
+  "revision": "r1",
+  "title": "Build a Local Second Brain for an Agent",
+  "language": "en",
+  "pain_point": "Useful links and project knowledge disappear across chats and agent sessions.",
+  "story": "Install sdtk-brain, initialize or adopt a local vault, ingest bounded repository sources, compile safely, inspect the graph, search, and ask through local LM Studio.",
+  "product_proof": [
+    "Run the real sdtk-brain install and initialization workflow.",
+    "Ingest bounded local source records and compile with the owner-approved apply receipt.",
+    "Open the real graph, inspect a source file, search the vault, and use SDTK-WIKI Ask with local LM Studio only."
+  ],
+  "source_boundaries": [
+    "Use /workspace/sdtk-wiki/ai-agent-second-brain-main as the owner-approved vault.",
+    "Use only the approved open-seo, EpicStaff, and page-agent source receipts.",
+    "Ask must use local LM Studio only and show grounded citations."
+  ],
+  "cta": "https://sdtk.dev/",
+  "workflow_template": "marketing_video_episode_r1",
+  "quality_profile": "evidence_bound_explainer_r1",
+  "toolchain": {
+    "sdtk_marketing": "0.19.0",
+    "sdtk_agent": "0.5.4",
+    "sdtk_brain": "0.4.2",
+    "sdtk_wiki": "0.25.0",
+    "hermes_adapter": "0.3.13"
+  },
+  "allowed_roles": [
+    "researcher",
+    "wiki",
+    "orchestrator",
+    "developer",
+    "video",
+    "social"
+  ],
+  "capture_contract": {
+    "mode": "second_brain_local",
+    "instruction": "Capture the real sdtk-brain install, initialize, ingest, compile, and graph/search workflow. Capture SDTK-WIKI Ask only through local LM Studio with grounded citations; do not use a remote model runtime."
+  }
+}
