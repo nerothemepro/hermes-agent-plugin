@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 ALLOWED_ACTIONS = ("sdtk-agent", "run", "status"), ("sdtk-agent", "run", "continue")
+VIDEO_GATE_ALIASES = {"owner_story_lock": "story_lock", "owner_picture_lock": "picture_lock", "owner_publish_approval": "publish"}
 
 
 def utc_now() -> str:
@@ -107,6 +108,28 @@ class Monitor:
         self.dedupe[key] = {"hash": digest, "sent_at": sent_at}
         self._save_json(self.dedupe_path, self.dedupe)
         print(json.dumps({"event": "notification_sent", "key": key, "sent_at": sent_at}, sort_keys=True), flush=True)
+
+    def _gate_packet(self, run_id: str, gate: str) -> dict | None:
+        public_gate = VIDEO_GATE_ALIASES.get(gate)
+        if not public_gate:
+            return None
+        result = subprocess.run(
+            ["node", str(self.project_path / "bin" / "hermes-video-self-service"), "packet", run_id, public_gate],
+            check=False, capture_output=True, text=True, timeout=20,
+            env={k: v for k, v in os.environ.items() if k != "HERMES_KANBAN_HOME"},
+        )
+        if result.returncode != 0:
+            return None
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict) or payload.get("status") != "gate_packet_ready":
+            return None
+        packet_sha = payload.get("packet_sha256")
+        if not isinstance(packet_sha, str) or len(packet_sha) != 64 or any(char not in "0123456789abcdef" for char in packet_sha):
+            return None
+        return payload
 
     def _hermes_task_status(self, task_id: str) -> str | None:
         result = subprocess.run(
@@ -280,10 +303,19 @@ class Monitor:
                     observation["continue_status"] = continued.get("status")
             elif normalized.get("blocker_class") == "OWNER_GATE" and status_changed:
                 gate = normalized.get("owner_gate") or "owner_review"
-                self._notify(
-                    f"{run_id}:waiting_for_approval:{gate}",
-                    f"SDTK run waiting for approval\nrun_id: {run_id}\ngate: {gate}\nAPPROVE GATE {run_id} {gate}",
-                )
+                packet = self._gate_packet(run_id, gate) if record.get("episode_manifest_sha256") else None
+                if packet:
+                    public_gate = VIDEO_GATE_ALIASES[gate]
+                    observation["gate_packet_sha256"] = packet["packet_sha256"]
+                    self._notify(
+                        f"{run_id}:waiting_for_approval:{gate}:{packet['packet_sha256']}",
+                        f"SDTK video run waiting for approval\nrun_id: {run_id}\ngate: {public_gate}\nAPPROVE VIDEO GATE {run_id} {public_gate} {packet['packet_sha256']}",
+                    )
+                else:
+                    self._notify(
+                        f"{run_id}:waiting_for_approval:{gate}",
+                        f"SDTK run waiting for approval\nrun_id: {run_id}\ngate: {gate}\nAPPROVE GATE {run_id} {gate}",
+                    )
             elif normalized.get("status") == "completed" and status_changed:
                 self._notify(
                     f"{run_id}:completed",
