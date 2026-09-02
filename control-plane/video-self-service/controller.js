@@ -86,7 +86,7 @@ function kickoff(input, dependencies = {}) {
   const normalized = normalizeRunState(state);
   if (normalized.terminal) return { status: 'terminal_no_dispatch', run_id: runId, normalized };
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json'], projectPath);
+  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--step', '--json'], projectPath);
   return { status: 'dispatched', run_id: runId, manifest_sha256: input.manifestSha256, result: parseJsonResult(result) };
 }
 
@@ -156,7 +156,7 @@ function approveGate(input, dependencies = {}) {
   persistGatePacket(assertGatePacket(projectPath, runId, gate, packetSha));
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
   runCommand(commandRunner, ['gate', 'approve', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--approved-by', 'owner', '--note', `packet_sha256=${packetSha}`], projectPath);
-  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json'], projectPath);
+  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--step', '--json'], projectPath);
   return { status: 'gate_approved_and_advanced', run_id: runId, gate_id: input.gateId, packet_sha256: packetSha, result: parseJsonResult(result) };
 }
 

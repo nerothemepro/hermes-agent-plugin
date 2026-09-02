@@ -49,7 +49,7 @@ test('kickoff requires matching preflight packet before one bounded dispatch', (
     commandRunner(_command, args) { argv = args; return { status: 0, stdout: JSON.stringify({ status: 'running' }) }; },
   });
   assert.equal(result.status, 'dispatched');
-  assert.deepEqual(argv, ['run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--json']);
+  assert.deepEqual(argv, ['run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--step', '--json']);
 });
 
 test('approve gate validates the current exact gate and advances once with the packet hash', (t) => {
@@ -67,7 +67,7 @@ test('approve gate validates the current exact gate and advances once with the p
   });
   assert.equal(result.status, 'gate_approved_and_advanced');
   assert.deepEqual(calls[0], ['gate', 'approve', '--project-path', f.project, '--run-id', f.runId, '--gate', 'owner_story_lock', '--approved-by', 'owner', '--note', `packet_sha256=${packet.packet_sha256}`]);
-  assert.deepEqual(calls[1], ['run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--json']);
+  assert.deepEqual(calls[1], ['run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--step', '--json']);
 });
 
 test('reject and cancel are fail-closed for a wrong state and terminal run', (t) => {
@@ -128,5 +128,5 @@ test('kickoff resolves the active staged toolchain before the global CLI', (t) =
     },
   });
   assert.equal(command, wrapper);
-  assert.deepEqual(argv, ['sdtk-agent', 'run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--json']);
+  assert.deepEqual(argv, ['sdtk-agent', 'run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--step', '--json']);
 });
