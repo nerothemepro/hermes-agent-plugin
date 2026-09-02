@@ -86,45 +86,55 @@ function status(input) {
   return { run_id: input.runId, normalized: normalizeRunState(state) };
 }
 
-function runRoot(projectPath, runId) { return path.join(path.resolve(projectPath), ".sdtk", "agent-runtime", "runs", requireRunId(runId)); }
-function gateDependency(gate) { return { owner_story_lock: "script_package", owner_picture_lock: "episode_render", owner_publish_approval: "social_package" }[gate]; }
+function runRoot(projectPath, runId) { return path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', requireRunId(runId)); }
+function gateDependency(gate) { return { owner_story_lock: 'script_package', owner_picture_lock: 'episode_render', owner_publish_approval: 'social_package' }[gate]; }
 function manifestShaFromState(state) {
   for (const task of Object.values(state.tasks || {})) {
     const value = task && task.params && task.params.episode_manifest_sha256;
-    if (/^[a-f0-9]{64}$/.test(String(value || ""))) return value;
+    if (/^[a-f0-9]{64}$/.test(String(value || ''))) return value;
   }
-  throw new Error("run is missing frozen episode manifest sha256");
+  throw new Error('run is missing frozen episode manifest sha256');
 }
-function gatePacketPath(projectPath, runId, gate) { return path.join(runRoot(projectPath, runId), "approval-packets", gate + ".json"); }
-function gatePacket(input) {
+function gatePacketPath(projectPath, runId, gate) { return path.join(runRoot(projectPath, runId), 'approval-packets', `${gate}.json`); }
+function buildGatePacket(input) {
   const projectPath = path.resolve(input.projectPath || DEFAULT_PROJECT_PATH);
   const runId = requireRunId(input.runId);
   const gate = requireGateAlias(input.gateId);
   const state = readRun(projectPath, runId);
-  if (state.status !== "waiting_for_approval" || state.waiting_gate !== gate) throw new Error("run is not waiting for this video gate");
+  if (state.status !== 'waiting_for_approval' || state.waiting_gate !== gate) throw new Error('run is not waiting for this video gate');
   const dependency = gateDependency(gate);
-  const evidencePath = path.join(runRoot(projectPath, runId), "evidence", dependency + ".json");
-  const evidence = readJson(evidencePath);
-  if (evidence.run_id !== runId || evidence.task_id !== dependency) throw new Error("gate dependency evidence identity mismatch");
-  const packet = { schema_version: "sdtk.marketing-video-gate-packet.v1", run_id: runId, gate_id: gate, public_gate_id: input.gateId, episode_manifest_sha256: manifestShaFromState(state), dependency: { task_id: dependency, evidence_path: evidencePath, evidence_sha256: sha256(fs.readFileSync(evidencePath)) } };
-  const serialized = JSON.stringify(packet, null, 2) + "\n";
-  const packetPath = gatePacketPath(projectPath, runId, gate);
-  if (fs.existsSync(packetPath)) {
-    const existing = fs.readFileSync(packetPath);
-    if (sha256(existing) !== sha256(serialized)) throw new Error("existing immutable gate packet does not match canonical evidence");
-  } else {
-    fs.mkdirSync(path.dirname(packetPath), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(packetPath, serialized, { mode: 0o600 });
+  const evidencePath = path.join(runRoot(projectPath, runId), 'evidence', `${dependency}.json`);
+  const evidenceBytes = fs.readFileSync(evidencePath);
+  const evidence = JSON.parse(evidenceBytes.toString('utf8'));
+  if (evidence.run_id !== runId || evidence.task_id !== dependency) throw new Error('gate dependency evidence identity mismatch');
+  const packet = {
+    schema_version: 'sdtk.marketing-video-gate-packet.v1',
+    run_id: runId,
+    gate_id: gate,
+    public_gate_id: input.gateId,
+    episode_manifest_sha256: manifestShaFromState(state),
+    dependency: { task_id: dependency, evidence_path: evidencePath, evidence_sha256: sha256(evidenceBytes) },
+  };
+  const serialized = JSON.stringify(packet, null, 2) + '\n';
+  return { packet, serialized, packet_path: gatePacketPath(projectPath, runId, gate), packet_sha256: sha256(serialized) };
+}
+function gatePacket(input) {
+  const built = buildGatePacket(input);
+  return { status: 'gate_packet_ready', run_id: input.runId, gate_id: input.gateId, packet_path: built.packet_path, packet_sha256: built.packet_sha256 };
+}
+function persistGatePacket(built) {
+  if (fs.existsSync(built.packet_path)) {
+    if (sha256(fs.readFileSync(built.packet_path)) !== built.packet_sha256) throw new Error('existing immutable gate packet does not match canonical evidence');
+    return;
   }
-  return { status: "gate_packet_ready", run_id: runId, gate_id: input.gateId, packet_path: packetPath, packet_sha256: sha256(serialized) };
+  fs.mkdirSync(path.dirname(built.packet_path), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(built.packet_path, built.serialized, { mode: 0o600 });
 }
 function assertGatePacket(projectPath, runId, gate, packetSha) {
-  const packetPath = gatePacketPath(projectPath, runId, gate);
-  const bytes = fs.readFileSync(packetPath);
-  if (sha256(bytes) !== packetSha) throw new Error("stale or mismatched gate packet sha256");
-  const packet = JSON.parse(bytes.toString("utf8"));
-  if (packet.run_id !== runId || packet.gate_id !== gate || packet.public_gate_id !== Object.keys(GATE_ALIASES).find((key) => GATE_ALIASES[key] === gate)) throw new Error("gate packet identity mismatch");
-  return packet;
+  const gateId = Object.keys(GATE_ALIASES).find((key) => GATE_ALIASES[key] === gate);
+  const built = buildGatePacket({ projectPath, runId, gateId });
+  if (built.packet_sha256 !== packetSha) throw new Error('stale or mismatched gate packet sha256');
+  return built;
 }
 
 function approveGate(input, dependencies = {}) {
@@ -134,7 +144,7 @@ function approveGate(input, dependencies = {}) {
   const packetSha = requirePacketSha(input.packetSha256);
   const state = readRun(projectPath, runId);
   if (state.status !== 'waiting_for_approval' || state.waiting_gate !== gate) throw new Error('run is not waiting for this video gate');
-  assertGatePacket(projectPath, runId, gate, packetSha);
+  persistGatePacket(assertGatePacket(projectPath, runId, gate, packetSha));
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
   runCommand(commandRunner, ['gate', 'approve', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--approved-by', 'owner', '--note', `packet_sha256=${packetSha}`]);
   const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json']);

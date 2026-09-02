@@ -169,3 +169,28 @@ class MonitorContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_self_service_gate_notification_contains_only_derived_packet_sha(self):
+        monitor = self.make_monitor("running_external")
+        monitor.bootstrap_path.write_text("ready\n")
+        record_path = monitor.registry / "run_test.json"
+        record = json.loads(record_path.read_text())
+        record["episode_manifest_sha256"] = "a" * 64
+        record_path.write_text(json.dumps(record))
+        state_path = Path(record["state_path"])
+        state_path.write_text(json.dumps({
+            "run_id": "run_test", "status": "waiting_for_approval", "waiting_gate": "owner_story_lock",
+            "tasks": {"owner_story_lock": {"type": "human_gate", "status": "waiting_for_approval"}},
+        }))
+        packet = {"status": "gate_packet_ready", "packet_sha256": "b" * 64}
+        with patch.object(monitor, "_infrastructure_checks", return_value={}), patch.object(monitor, "_gate_packet", return_value=packet), patch.object(monitor, "_notify") as notify:
+            monitor.tick()
+        text = notify.call_args.args[1]
+        self.assertIn("APPROVE VIDEO GATE run_test story_lock " + ("b" * 64), text)
+        self.assertNotIn("evidence_path", text)
+
+    def test_gate_packet_preview_refuses_invalid_controller_response(self):
+        monitor = self.make_monitor("completed")
+        completed = type("Result", (), {"returncode": 0, "stdout": '{"status":"gate_packet_ready","packet_sha256":"bad"}'})()
+        with patch("subprocess.run", return_value=completed):
+            self.assertIsNone(monitor._gate_packet("run_test", "owner_story_lock"))
