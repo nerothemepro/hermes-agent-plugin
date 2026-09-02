@@ -1,0 +1,38 @@
+{
+  "schema_version": "sdtk.marketing-video-episode.v1",
+  "episode_id": "EP4",
+  "revision": "r1",
+  "title": "One Requirement, a Reviewable Plan",
+  "language": "en",
+  "pain_point": "A raw customer requirement is difficult to turn into reviewable, traceable implementation work.",
+  "story": "Show a real requirement moving through SDTK-SPEC, SDTK-WIKI Kanban, and an attended SDTK-CODE handoff.",
+  "product_proof": [
+    "Use the real sdtk-spec workflow to decompose one bounded requirement.",
+    "Project the real planning artifacts into SDTK-WIKI Kanban.",
+    "Show an attended sdtk-code handoff without claiming production completion."
+  ],
+  "source_boundaries": [
+    "Use a dedicated demo project and label all planning data as demo evidence.",
+    "Do not modify production backlog or claim customer delivery."
+  ],
+  "cta": "https://sdtk.dev/",
+  "workflow_template": "marketing_video_episode_r1",
+  "quality_profile": "evidence_bound_explainer_r1",
+  "toolchain": {
+    "sdtk_marketing": "0.19.0",
+    "sdtk_agent": "0.5.4",
+    "hermes_adapter": "0.3.13"
+  },
+  "allowed_roles": [
+    "researcher",
+    "wiki",
+    "orchestrator",
+    "developer",
+    "video",
+    "social"
+  ],
+  "capture_contract": {
+    "mode": "spec_workflow_demo",
+    "instruction": "Capture the real sdtk-spec requirement decomposition, SDTK-WIKI Kanban projection, and attended sdtk-code handoff in a visibly labelled demo project."
+  }
+}

@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const childProcess = require('child_process');
 
 const { buildEp2Workflow } = require('../../src/hermesControlPlaneEp2');
+const { normalizeRunState } = require('../video-self-service/normalized-state');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
@@ -42,6 +43,7 @@ function readState(projectPath, runId) {
 
 function inspectRun(projectPath, runId) {
   const state = readState(projectPath, runId);
+  const normalized = normalizeRunState(state);
   const tasks = Object.entries(state.tasks).map(([taskId, task]) => ({
     task_id: taskId,
     type: task.type || 'task',
@@ -56,6 +58,7 @@ function inspectRun(projectPath, runId) {
   const ready = tasks.filter((task) => task.type === 'task' && task.status === 'ready');
   const ownerGate = tasks.find((task) => task.type === 'human_gate' && task.status === 'waiting_for_approval');
   return {
+    normalized,
     run_id: runId,
     status: state.status,
     updated_at: state.updated_at || null,

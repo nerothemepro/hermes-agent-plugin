@@ -1,0 +1,17 @@
+{
+  "schema_version": "sdtk.marketing-video-toolchain-policy.v1",
+  "quality_profiles": ["evidence_bound_explainer_r1"],
+  "required_tools": ["node", "ffmpeg", "ffprobe", "sdtk-agent", "sdtk-marketing"],
+  "role_profiles": {
+    "researcher": "herresearch",
+    "wiki": "herwiki",
+    "orchestrator": "herorches",
+    "developer": "herdev",
+    "video": "hervid",
+    "social": "hersocial"
+  },
+  "publish_policy": {
+    "external_publish": false,
+    "require_auto_post_disabled": true
+  }
+}

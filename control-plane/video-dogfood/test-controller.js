@@ -44,6 +44,8 @@ test('inspect reports ready dispatch count and roles from canonical ledger', () 
     assert.strictEqual(result.ready_dispatch_count, 2);
     assert.deepStrictEqual(result.ready_roles, ['researcher', 'wiki']);
     assert.strictEqual(result.owner_gate, null);
+    assert.strictEqual(result.normalized.status, 'running');
+    assert.deepStrictEqual(result.normalized.next_action, { action: 'owner_confirmed_continue_required', task_ids: ['research_evidence', 'episode_lessons'] });
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }

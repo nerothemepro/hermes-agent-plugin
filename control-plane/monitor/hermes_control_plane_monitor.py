@@ -202,6 +202,18 @@ class Monitor:
         self._save_json(self.seen_path, self.seen)
         return previous != status
 
+    def _normalized_state(self, state_path: Path) -> dict:
+        normalizer = Path(__file__).resolve().parents[1] / "video-self-service" / "normalized-state.js"
+        result = subprocess.run(
+            ["node", str(normalizer), str(state_path)], check=False, capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            raise RuntimeError("shared state normalization failed")
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("shared state normalization returned invalid JSON") from error
+
     def _state(self, record: dict) -> dict:
         return self._load_json(Path(record["state_path"]), {})
 
@@ -211,6 +223,7 @@ class Monitor:
         for record in self._registry_records():
             run_id = record["run_id"]
             state = self._state(record)
+            normalized = self._normalized_state(Path(record["state_path"]))
             run_status = state.get("status") or state.get("run_status")
             tasks = state.get("tasks", {})
             waiting_task_id = state.get("waiting_task_id")
@@ -228,6 +241,7 @@ class Monitor:
             status_changed = self._is_new_status(run_id, status)
             observation = {
                 "run_id": run_id,
+                "normalized": normalized,
                 "status": status,
                 "action": "none",
                 "active_task_ids": [task_id for task_id, _ in active],
@@ -264,18 +278,18 @@ class Monitor:
                     continued = self._run(["sdtk-agent", "run", "continue"], run_id)
                     observation["action"] = "continue"
                     observation["continue_status"] = continued.get("status")
-            elif status == "waiting_for_approval" and status_changed:
-                gate = state.get("waiting_gate_id") or state.get("waiting_gate") or state.get("gate") or "owner_review"
+            elif normalized.get("blocker_class") == "OWNER_GATE" and status_changed:
+                gate = normalized.get("owner_gate") or "owner_review"
                 self._notify(
                     f"{run_id}:waiting_for_approval:{gate}",
                     f"SDTK run waiting for approval\nrun_id: {run_id}\ngate: {gate}\nAPPROVE GATE {run_id} {gate}",
                 )
-            elif status == "completed" and status_changed:
+            elif normalized.get("status") == "completed" and status_changed:
                 self._notify(
                     f"{run_id}:completed",
                     f"SDTK run completed\nrun_id: {run_id}\nreport: {record.get('canonical_report_path', '')}",
                 )
-            elif status in ("failed", "blocked", "cancelled") and status_changed:
+            elif normalized.get("terminal") and normalized.get("status") in ("failed", "blocked", "cancelled") and status_changed:
                 self._notify(f"{run_id}:failure:{status}", f"SDTK run requires attention\nrun_id: {run_id}\nstatus: {status}")
             observations.append(observation)
         if bootstrap:

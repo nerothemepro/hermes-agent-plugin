@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
-const { EP2_PROFILES, EP2_TEMPLATE_ID, buildEp2RuntimeMap, buildEp2Workflow } = require('./hermesControlPlaneEp2');
+const { EP2_PROFILES, EP2_TEMPLATE_ID, buildEp2RuntimeMap, buildEp2Workflow, loadEpisodeSpec } = require('./hermesControlPlaneEp2');
 
 const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
 const DEFAULT_TEMPLATE_ROOT = path.join(DEFAULT_PROJECT_PATH, 'control-plane', 'templates');
@@ -191,6 +191,9 @@ function previewTemplate(templateId, rawParams, options = {}) {
   const { template, filePath } = loadTemplate(templateId, options);
   const params = validateParams(template, rawParams, options);
   const workflow = buildWorkflow(template, params, options);
+  const episode = template.template_id === EP2_TEMPLATE_ID
+    ? loadEpisodeSpec(params.episode, options.episodeManifestRoot)
+    : null;
   const runtimeMap = buildRuntimeMap(template);
   const taskCount = workflow.stages.filter((stage) => stage.type === 'task').length;
   const profiles = template.template_id === EP2_TEMPLATE_ID ? EP2_PROFILES : [template.allowed_profile];
@@ -201,6 +204,11 @@ function previewTemplate(templateId, rawParams, options = {}) {
     template_version: template.version,
     template_path: filePath,
     template_sha256: sha256(fs.readFileSync(filePath)),
+    ...(episode ? {
+      episode_manifest: episode.episode_manifest,
+      episode_manifest_path: episode.episode_manifest_path,
+      episode_manifest_sha256: episode.episode_manifest_sha256,
+    } : {}),
     params,
     task_count: taskCount,
     gate_count: gateCount,

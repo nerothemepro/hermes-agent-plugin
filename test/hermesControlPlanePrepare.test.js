@@ -24,6 +24,15 @@ test('control-plane registry record stays reference-only', () => {
   assert.ok(!serialized.includes('HERMES_HOME'));
 });
 
+test('marketing video registry pins the episode manifest fingerprint', () => {
+  const preview = previewTemplate('marketing_video_ep_usage', { episode: 'EP3' }, {
+    templateRoot: path.join(__dirname, '..', 'control-plane', 'templates'),
+  });
+  const record = buildRegistryRecord(preview, 'run_ep3abc_def456', '/tmp/hermes-project');
+  assert.strictEqual(record.episode_manifest_sha256, preview.episode_manifest_sha256);
+  assert.strictEqual(record.episode_manifest_path, preview.episode_manifest_path);
+});
+
 test('EP2 duplicate protection reuses only a nonterminal canonical ledger record', () => {
   const { findReusableEp2Record } = require('../src/hermesControlPlanePrepare');
   const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-ep2-project-'));
@@ -107,6 +116,11 @@ test('marketing video duplicate protection isolates episode and template fingerp
     assert.strictEqual(findReusableEp2Record(registryDir, projectPath, preview), null);
 
     record.template_sha256 = preview.template_sha256;
+    record.episode_manifest_sha256 = 'f'.repeat(64);
+    fs.writeFileSync(recordPath, JSON.stringify(record));
+    assert.strictEqual(findReusableEp2Record(registryDir, projectPath, preview), null);
+
+    record.episode_manifest_sha256 = preview.episode_manifest_sha256;
     fs.writeFileSync(recordPath, JSON.stringify(record));
     assert.strictEqual(findReusableEp2Record(registryDir, projectPath, preview).record.run_id, runId);
   } finally {
