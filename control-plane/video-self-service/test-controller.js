@@ -55,14 +55,18 @@ test('kickoff requires matching preflight packet before one bounded dispatch', (
 test('approve gate validates the current exact gate and advances once with the packet hash', (t) => {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'state.json'), JSON.stringify({ run_id: f.runId, status: 'waiting_for_approval', waiting_gate: 'owner_story_lock', tasks: {} }));
-  const { approveGate } = require('./controller');
+  fs.writeFileSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'state.json'), JSON.stringify({ run_id: f.runId, status: 'waiting_for_approval', waiting_gate: 'owner_story_lock', tasks: { script_package: { params: { episode_manifest_sha256: 'b'.repeat(64) } } } }));
+  const evidenceDir = path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'evidence');
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, 'script_package.json'), JSON.stringify({ run_id: f.runId, task_id: 'script_package' }));
+  const { approveGate, gatePacket } = require('./controller');
+  const packet = gatePacket({ projectPath: f.project, runId: f.runId, gateId: 'story_lock' });
   const calls = [];
-  const result = approveGate({ projectPath: f.project, runId: f.runId, gateId: 'story_lock', packetSha256: 'a'.repeat(64) }, {
+  const result = approveGate({ projectPath: f.project, runId: f.runId, gateId: 'story_lock', packetSha256: packet.packet_sha256 }, {
     commandRunner(_command, args) { calls.push(args); return { status: 0, stdout: JSON.stringify({ status: 'running' }) }; },
   });
   assert.equal(result.status, 'gate_approved_and_advanced');
-  assert.deepEqual(calls[0], ['gate', 'approve', '--project-path', f.project, '--run-id', f.runId, '--gate', 'owner_story_lock', '--approved-by', 'owner', '--note', `packet_sha256=${'a'.repeat(64)}`]);
+  assert.deepEqual(calls[0], ['gate', 'approve', '--project-path', f.project, '--run-id', f.runId, '--gate', 'owner_story_lock', '--approved-by', 'owner', '--note', `packet_sha256=${packet.packet_sha256}`]);
   assert.deepEqual(calls[1], ['run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--json']);
 });
 
