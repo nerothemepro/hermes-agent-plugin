@@ -21,7 +21,7 @@
   "toolchain": {
     "sdtk_marketing": "0.19.0",
     "sdtk_agent": "0.5.6",
-    "hermes_adapter": "0.3.14"
+    "hermes_adapter": "0.3.15"
   },
   "allowed_roles": [
     "researcher",
