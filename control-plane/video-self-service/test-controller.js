@@ -99,3 +99,32 @@ test('canonical core state derives a waiting gate from the task lifecycle, not a
   assert.equal(waitingGate({ tasks: { owner_story_lock: { type: 'human_gate', status: 'waiting_for_approval' } } }), 'owner_story_lock');
   assert.equal(waitingGate({ tasks: { owner_story_lock: { type: 'human_gate', status: 'completed' } } }), null);
 });
+
+test('kickoff resolves the active staged toolchain before the global CLI', (t) => {
+  const f = fixture();
+  const toolchainRoot = path.join(f.root, 'toolchain');
+  const wrapper = path.join(f.project, 'control-plane', 'video-dogfood', 'staging', 'with-active-toolchain.sh');
+  const previous = process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+  t.after(() => {
+    fs.rmSync(f.root, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+    else process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = previous;
+  });
+  fs.mkdirSync(path.dirname(wrapper), { recursive: true });
+  fs.writeFileSync(wrapper, '#!/usr/bin/env bash\n');
+  fs.mkdirSync(toolchainRoot, { recursive: true });
+  fs.writeFileSync(path.join(toolchainRoot, 'active-release'), 'self-service-r3\n');
+  fs.writeFileSync(path.join(f.registry, f.runId + '.json'), JSON.stringify({ run_id: f.runId, episode_manifest_sha256: 'c'.repeat(64) }));
+  process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = toolchainRoot;
+  let command;
+  let argv;
+  kickoff({ projectPath: f.project, registryDir: f.registry, runId: f.runId, manifestSha256: 'c'.repeat(64) }, {
+    commandRunner(invoked, args) {
+      command = invoked;
+      argv = args;
+      return { status: 0, stdout: JSON.stringify({ status: 'running' }) };
+    },
+  });
+  assert.equal(command, wrapper);
+  assert.deepEqual(argv, ['sdtk-agent', 'run', 'continue', '--project-path', f.project, '--run-id', f.runId, '--confirm', '--json']);
+});

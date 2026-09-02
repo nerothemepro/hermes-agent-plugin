@@ -17,6 +17,7 @@ const GATE_ALIASES = Object.freeze({
   publish: 'owner_publish_approval',
 });
 const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,48}$/;
+const DEFAULT_TOOLCHAIN_ROOT = "/opt/data/hermes/control-plane/video-dogfood/toolchain";
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function requireRunId(runId) { if (!RUN_ID_PATTERN.test(String(runId || ''))) throw new Error('invalid run id'); return runId; }
@@ -47,8 +48,16 @@ function taskRecord(state, taskId) {
   if (!task || typeof task !== 'object') throw new Error('unknown task id');
   return task;
 }
-function runCommand(commandRunner, args) {
-  const result = commandRunner('sdtk-agent', args, { encoding: 'utf8', env: process.env });
+function activeAgentCommand(projectPath) {
+  const toolchainRoot = process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT || DEFAULT_TOOLCHAIN_ROOT;
+  const pointer = path.join(toolchainRoot, "active-release");
+  const wrapper = path.join(path.resolve(projectPath), "control-plane", "video-dogfood", "staging", "with-active-toolchain.sh");
+  if (fs.existsSync(pointer) && fs.existsSync(wrapper)) return [wrapper, "sdtk-agent"];
+  return ["sdtk-agent"];
+}
+function runCommand(commandRunner, args, projectPath) {
+  const [command, ...prefix] = activeAgentCommand(projectPath);
+  const result = commandRunner(command, [...prefix, ...args], { encoding: "utf8", env: process.env });
   if (!result || result.status !== 0) throw new Error('controller command failed closed');
   return result;
 }
@@ -84,7 +93,7 @@ function kickoff(input, dependencies = {}) {
   const normalized = normalizeRunState(state);
   if (normalized.terminal) return { status: 'terminal_no_dispatch', run_id: runId, normalized };
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json']);
+  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json'], projectPath);
   return { status: 'dispatched', run_id: runId, manifest_sha256: input.manifestSha256, result: parseJsonResult(result) };
 }
 
@@ -153,8 +162,8 @@ function approveGate(input, dependencies = {}) {
   if (state.status !== 'waiting_for_approval' || waitingGate(state) !== gate) throw new Error('run is not waiting for this video gate');
   persistGatePacket(assertGatePacket(projectPath, runId, gate, packetSha));
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  runCommand(commandRunner, ['gate', 'approve', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--approved-by', 'owner', '--note', `packet_sha256=${packetSha}`]);
-  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json']);
+  runCommand(commandRunner, ['gate', 'approve', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--approved-by', 'owner', '--note', `packet_sha256=${packetSha}`], projectPath);
+  const result = runCommand(commandRunner, ['run', 'continue', '--project-path', projectPath, '--run-id', runId, '--confirm', '--json'], projectPath);
   return { status: 'gate_approved_and_advanced', run_id: runId, gate_id: input.gateId, packet_sha256: packetSha, result: parseJsonResult(result) };
 }
 
@@ -166,7 +175,7 @@ function rejectGate(input, dependencies = {}) {
   const state = readRun(projectPath, runId);
   if (state.status !== 'waiting_for_approval' || waitingGate(state) !== gate) throw new Error('run is not waiting for this video gate');
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  runCommand(commandRunner, ['gate', 'reject', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--rejected-by', 'owner', '--needs-changes', '--note', `reason_code=${reasonCode}`]);
+  runCommand(commandRunner, ['gate', 'reject', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--rejected-by', 'owner', '--needs-changes', '--note', `reason_code=${reasonCode}`], projectPath);
   return { status: 'gate_rejected', run_id: runId, gate_id: input.gateId, reason_code: reasonCode };
 }
 
@@ -176,7 +185,7 @@ function cancel(input, dependencies = {}) {
   const state = readRun(projectPath, runId);
   if (normalizeRunState(state).terminal) return { status: 'terminal_no_cancel', run_id: runId };
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  const result = runCommand(commandRunner, ['run', 'cancel', '--project-path', projectPath, '--run-id', runId, '--reason', 'owner_video_cancelled', '--json']);
+  const result = runCommand(commandRunner, ['run', 'cancel', '--project-path', projectPath, '--run-id', runId, '--reason', 'owner_video_cancelled', '--json'], projectPath);
   return { status: 'cancelled', run_id: runId, result: parseJsonResult(result) };
 }
 
@@ -184,7 +193,7 @@ function reconcile(input, dependencies = {}) {
   const projectPath = path.resolve(input.projectPath || DEFAULT_PROJECT_PATH);
   const runId = requireRunId(input.runId);
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  const result = runCommand(commandRunner, ['run', 'reconcile', '--project-path', projectPath, '--run-id', runId, '--json']);
+  const result = runCommand(commandRunner, ['run', 'reconcile', '--project-path', projectPath, '--run-id', runId, '--json'], projectPath);
   return { status: 'reconciled', run_id: runId, result: parseJsonResult(result) };
 }
 
@@ -198,7 +207,7 @@ function recover(input, dependencies = {}) {
   if (task.blocker_class !== 'RECOVERABLE_WORKER') throw new Error('task is not recoverable_worker');
   if (Number(task.retry_count || 0) >= 1) throw new Error('recoverable worker retry budget exhausted');
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
-  const result = runCommand(commandRunner, ['task', 'retry', '--project-path', projectPath, '--run-id', runId, '--task', taskId, '--max', '1', '--reason', 'recoverable_worker', '--json']);
+  const result = runCommand(commandRunner, ['task', 'retry', '--project-path', projectPath, '--run-id', runId, '--task', taskId, '--max', '1', '--reason', 'recoverable_worker', '--json'], projectPath);
   return { status: 'recovery_rereadied', run_id: runId, task_id: taskId, result: parseJsonResult(result) };
 }
 
