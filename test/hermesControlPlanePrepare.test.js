@@ -33,6 +33,13 @@ test('marketing video registry pins the episode manifest fingerprint', () => {
   assert.strictEqual(record.episode_manifest_path, preview.episode_manifest_path);
 });
 
+test('marketing video registry falls back to the preflight manifest fingerprint', () => {
+  const record = buildRegistryRecord({ template_id: 'marketing_video_ep_usage', template_version: 'r3', template_sha256: 'c'.repeat(64), params: { episode: 'EP2' } }, 'run_ep2pre_abcdef', '/tmp/hermes-project', { manifest_path: '/tmp/episodes/EP2.r1.json', manifest_sha256: 'd'.repeat(64), preflight_sha256: 'e'.repeat(64) });
+  assert.strictEqual(record.episode_manifest_path, '/tmp/episodes/EP2.r1.json');
+  assert.strictEqual(record.episode_manifest_sha256, 'd'.repeat(64));
+  assert.strictEqual(record.preflight_sha256, 'e'.repeat(64));
+});
+
 test('EP2 duplicate protection reuses only a nonterminal canonical ledger record', () => {
   const { findReusableEp2Record } = require('../src/hermesControlPlanePrepare');
   const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-ep2-project-'));

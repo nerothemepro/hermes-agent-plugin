@@ -18,6 +18,8 @@ const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
 
 function buildRegistryRecord(preview, runId, projectPath, preflightPacket = null) {
   const runRoot = path.join(path.resolve(projectPath), '.sdtk', 'agent-runtime', 'runs', runId);
+  const episodeManifestSha256 = preview.episode_manifest_sha256 || preflightPacket?.manifest_sha256;
+  const episodeManifestPath = preview.episode_manifest_path || preflightPacket?.manifest_path;
   return {
     schema_version: 'hermes.control-plane-run-reference.v1',
     run_id: runId,
@@ -25,9 +27,9 @@ function buildRegistryRecord(preview, runId, projectPath, preflightPacket = null
     template_version: preview.template_version,
     template_sha256: preview.template_sha256,
     template_variant: preview.params?.episode || null,
-    ...(preview.episode_manifest_sha256 ? {
-      episode_manifest_path: preview.episode_manifest_path,
-      episode_manifest_sha256: preview.episode_manifest_sha256,
+    ...(episodeManifestSha256 ? {
+      episode_manifest_path: episodeManifestPath,
+      episode_manifest_sha256: episodeManifestSha256,
       ...(preflightPacket ? { preflight_sha256: preflightPacket.preflight_sha256 } : {}),
     } : {}),
     ledger_path: runRoot,
