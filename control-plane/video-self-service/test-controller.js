@@ -58,7 +58,7 @@ test('approve gate validates the current exact gate and advances once with the p
   fs.writeFileSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'state.json'), JSON.stringify({ run_id: f.runId, status: 'waiting_for_approval', waiting_gate: 'owner_story_lock', tasks: { script_package: { params: { episode_manifest_sha256: 'b'.repeat(64) } } } }));
   const evidenceDir = path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'evidence');
   fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, 'script_package.json'), JSON.stringify({ run_id: f.runId, task_id: 'script_package' }));
+  fs.writeFileSync(path.join(evidenceDir, 'script_package.evidence.json'), JSON.stringify({ run_id: f.runId, task_id: 'script_package' }));
   const { approveGate, gatePacket } = require('./controller');
   const packet = gatePacket({ projectPath: f.project, runId: f.runId, gateId: 'story_lock' });
   const calls = [];
@@ -92,4 +92,10 @@ test('recovery permits one recoverable-worker retry only and never dispatches it
   assert.deepEqual(args, ['task', 'retry', '--project-path', f.project, '--run-id', f.runId, '--task', 'episode_render', '--max', '1', '--reason', 'recoverable_worker', '--json']);
   fs.writeFileSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs', f.runId, 'state.json'), JSON.stringify({ run_id: f.runId, status: 'blocked', tasks: { episode_render: { blocker_class: 'RECOVERABLE_WORKER', retry_count: 1 } } }));
   assert.throws(() => recover({ projectPath: f.project, runId: f.runId, taskId: 'episode_render' }), /budget exhausted/);
+});
+
+test('canonical core state derives a waiting gate from the task lifecycle, not a non-existent shortcut', () => {
+  const { waitingGate } = require('./controller');
+  assert.equal(waitingGate({ tasks: { owner_story_lock: { type: 'human_gate', status: 'waiting_for_approval' } } }), 'owner_story_lock');
+  assert.equal(waitingGate({ tasks: { owner_story_lock: { type: 'human_gate', status: 'completed' } } }), null);
 });
