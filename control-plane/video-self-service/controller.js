@@ -9,8 +9,8 @@ const { normalizeRunState } = require('./normalized-state');
 const { prepareTemplate } = require('../../src/hermesControlPlanePrepare');
 
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
-const DEFAULT_PROJECT_PATH = '/workspace/hermes-agent-plugin';
-const DEFAULT_REGISTRY_DIR = '/opt/data/hermes/control-plane/runs';
+const DEFAULT_PROJECT_PATH = process.env.SDTK_VIDEO_SELF_SERVICE_PROJECT_PATH || '/workspace/hermes-agent-plugin';
+const DEFAULT_REGISTRY_DIR = process.env.SDTK_VIDEO_SELF_SERVICE_REGISTRY_DIR || '/opt/data/hermes/control-plane/runs';
 const GATE_ALIASES = Object.freeze({
   story_lock: 'owner_story_lock',
   picture_lock: 'owner_picture_lock',
@@ -34,6 +34,13 @@ function requirePacketSha(packetSha) {
 function requireReasonCode(reasonCode) {
   if (!REASON_CODE_PATTERN.test(String(reasonCode || ''))) throw new Error('invalid reason code');
   return reasonCode;
+}
+function waitingGate(state) {
+  if (typeof state?.waiting_gate === "string") return state.waiting_gate;
+  for (const [taskId, task] of Object.entries(state?.tasks || {})) {
+    if (task && task.type === "human_gate" && task.status === "waiting_for_approval") return taskId;
+  }
+  return null;
 }
 function taskRecord(state, taskId) {
   const task = state && state.tasks && state.tasks[taskId];
@@ -101,9 +108,9 @@ function buildGatePacket(input) {
   const runId = requireRunId(input.runId);
   const gate = requireGateAlias(input.gateId);
   const state = readRun(projectPath, runId);
-  if (state.status !== 'waiting_for_approval' || state.waiting_gate !== gate) throw new Error('run is not waiting for this video gate');
+  if (state.status !== 'waiting_for_approval' || waitingGate(state) !== gate) throw new Error('run is not waiting for this video gate');
   const dependency = gateDependency(gate);
-  const evidencePath = path.join(runRoot(projectPath, runId), 'evidence', `${dependency}.json`);
+  const evidencePath = path.join(runRoot(projectPath, runId), 'evidence', `${dependency}.evidence.json`);
   const evidenceBytes = fs.readFileSync(evidencePath);
   const evidence = JSON.parse(evidenceBytes.toString('utf8'));
   if (evidence.run_id !== runId || evidence.task_id !== dependency) throw new Error('gate dependency evidence identity mismatch');
@@ -143,7 +150,7 @@ function approveGate(input, dependencies = {}) {
   const gate = requireGateAlias(input.gateId);
   const packetSha = requirePacketSha(input.packetSha256);
   const state = readRun(projectPath, runId);
-  if (state.status !== 'waiting_for_approval' || state.waiting_gate !== gate) throw new Error('run is not waiting for this video gate');
+  if (state.status !== 'waiting_for_approval' || waitingGate(state) !== gate) throw new Error('run is not waiting for this video gate');
   persistGatePacket(assertGatePacket(projectPath, runId, gate, packetSha));
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
   runCommand(commandRunner, ['gate', 'approve', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--approved-by', 'owner', '--note', `packet_sha256=${packetSha}`]);
@@ -157,7 +164,7 @@ function rejectGate(input, dependencies = {}) {
   const gate = requireGateAlias(input.gateId);
   const reasonCode = requireReasonCode(input.reasonCode);
   const state = readRun(projectPath, runId);
-  if (state.status !== 'waiting_for_approval' || state.waiting_gate !== gate) throw new Error('run is not waiting for this video gate');
+  if (state.status !== 'waiting_for_approval' || waitingGate(state) !== gate) throw new Error('run is not waiting for this video gate');
   const commandRunner = dependencies.commandRunner || childProcess.spawnSync;
   runCommand(commandRunner, ['gate', 'reject', '--project-path', projectPath, '--run-id', runId, '--gate', gate, '--rejected-by', 'owner', '--needs-changes', '--note', `reason_code=${reasonCode}`]);
   return { status: 'gate_rejected', run_id: runId, gate_id: input.gateId, reason_code: reasonCode };
@@ -202,4 +209,4 @@ function command(argv, dependencies = {}) {
   throw new Error('unsupported self-service controller command');
 }
 
-module.exports = { GATE_ALIASES, approveGate, assertGatePacket, assertManifest, cancel, gatePacket, command, kickoff, prepare, readRun, reconcile, recover, registryPath, rejectGate, sha256, status };
+module.exports = { GATE_ALIASES, waitingGate, approveGate, assertGatePacket, assertManifest, cancel, gatePacket, command, kickoff, prepare, readRun, reconcile, recover, registryPath, rejectGate, sha256, status };
