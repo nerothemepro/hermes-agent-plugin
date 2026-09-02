@@ -5,9 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const { loadEpisodeManifest } = require('./episode-manifest');
 const { selectActiveRun } = require('./normalized-state');
+const { activePackageVersion, activeToolchainEnvironment } = require('../../src/hermesControlPlaneToolchain');
 
 const DEFAULT_POLICY_PATH = path.join(__dirname, 'toolchain-policy.json');
 const DEFAULT_RUN_ROOT = '.sdtk/agent-runtime/runs';
+const DEFAULT_HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
+const DEFAULT_HERMES_PROFILES_ROOT = '/opt/data/hermes-profiles';
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function readJson(filePath) { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
@@ -56,6 +59,13 @@ function defaultCommandRunner(command, args, options = {}) {
   return childProcess.spawnSync(command, args, { encoding: 'utf8', timeout: options.timeoutMs || 30000, env: options.env || process.env });
 }
 
+function toolVersionArgs(tool) { return tool === 'ffmpeg' || tool === 'ffprobe' ? ['-version'] : ['--version']; }
+function hermesBinary(env) { return env.HERMES_BIN || DEFAULT_HERMES_BIN; }
+function profileEnvironment(env, profile) {
+  const home = path.join(env.HERMES_PROFILES_ROOT || DEFAULT_HERMES_PROFILES_ROOT, profile);
+  return { ...env, HERMES_HOME: home, HERMES_KANBAN_HOME: home };
+}
+
 function commandCheck(runner, command, args, env) {
   try {
     const result = runner(command, args, { env, timeoutMs: 30000 }) || {};
@@ -91,8 +101,10 @@ function preflightEpisode(input, deps = {}) {
   const manifestEntry = loadEpisodeManifest(episode, { episodeManifestRoot: manifestRoot });
   const policy = loadPolicy(input.policyPath);
   const runner = deps.commandRunner || defaultCommandRunner;
-  const packageVersion = deps.packageVersionResolver || defaultPackageVersionResolver;
-  const env = Object.assign({}, process.env, input.env || {});
+  const baseEnv = Object.assign({}, process.env, input.env || {});
+  const env = activeToolchainEnvironment(baseEnv);
+  const fallbackPackageVersion = deps.packageVersionResolver || defaultPackageVersionResolver;
+  const packageVersion = (packageName) => activePackageVersion(packageName, baseEnv) || fallbackPackageVersion(packageName);
   const checks = [];
   const add = (name, ok, detail, extra = {}) => checks.push(Object.assign({ name, ok: Boolean(ok), detail: bounded(detail) }, extra));
 
@@ -102,13 +114,13 @@ function preflightEpisode(input, deps = {}) {
   add('duplicate_active_run', !duplicate, duplicate ? duplicate.run_id : 'none');
   for (const result of checkPackageVersions(manifestEntry.manifest, packageVersion)) checks.push(result);
   for (const tool of policy.required_tools) {
-    const result = commandCheck(runner, tool, ['--version'], env);
+    const result = commandCheck(runner, tool, toolVersionArgs(tool), env);
     add(`tool:${tool}`, result.ok, result.detail);
   }
   for (const role of manifestEntry.manifest.allowed_roles) {
     const profile = policy.role_profiles[role];
     if (!profile) { add(`role:${role}`, false, 'profile policy missing'); continue; }
-    const result = commandCheck(runner, 'hermes', ['-p', profile, 'kanban', 'list', '--json'], env);
+    const result = commandCheck(runner, hermesBinary(env), ['kanban', 'list', '--json'], profileEnvironment(env, profile));
     add(`role:${role}`, result.ok, profile, { profile, probe: result.detail });
   }
   const outputRoot = path.join(projectPath, DEFAULT_RUN_ROOT);
@@ -133,4 +145,4 @@ function preflightEpisode(input, deps = {}) {
   return packet;
 }
 
-module.exports = { DEFAULT_POLICY_PATH, loadPolicy, findActiveEpisodeRun, preflightEpisode };
+module.exports = { DEFAULT_HERMES_BIN, DEFAULT_POLICY_PATH, loadPolicy, findActiveEpisodeRun, preflightEpisode };

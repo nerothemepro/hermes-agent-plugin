@@ -7,7 +7,7 @@ const path = require('path');
 const test = require('node:test');
 
 const { previewTemplate } = require('../src/hermesControlPlane');
-const { buildRegistryRecord } = require('../src/hermesControlPlanePrepare');
+const { buildRegistryRecord, prepareTemplate } = require('../src/hermesControlPlanePrepare');
 
 test('control-plane registry record stays reference-only', () => {
   const preview = previewTemplate('site_audit', '{}', {
@@ -127,4 +127,40 @@ test('marketing video duplicate protection isolates episode and template fingerp
     fs.rmSync(projectPath, { recursive: true, force: true });
     fs.rmSync(registryDir, { recursive: true, force: true });
   }
+});
+
+test('prepare uses the active staged toolchain for run start', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-staged-prepare-'));
+  const projectPath = path.join(root, 'project');
+  const registryDir = path.join(root, 'registry');
+  const toolchainRoot = path.join(root, 'toolchain');
+  const wrapper = path.join(projectPath, 'control-plane', 'video-dogfood', 'staging', 'with-active-toolchain.sh');
+  const previous = process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+    else process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = previous;
+  });
+  fs.mkdirSync(path.dirname(wrapper), { recursive: true });
+  fs.writeFileSync(wrapper, '#!/usr/bin/env bash\n');
+  fs.mkdirSync(toolchainRoot, { recursive: true });
+  fs.writeFileSync(path.join(toolchainRoot, 'active-release'), 'self-service-r3\n');
+  fs.mkdirSync(path.join(toolchainRoot, 'releases', 'self-service-r3'), { recursive: true });
+  fs.writeFileSync(path.join(toolchainRoot, 'releases', 'self-service-r3', 'release.json'), '{}');
+  process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = toolchainRoot;
+  let command;
+  let argv;
+  const result = prepareTemplate('site_audit', '{}', {
+    projectPath,
+    registryDir,
+    templateRoot: path.join(__dirname, '..', 'control-plane', 'templates'),
+    commandRunner(invoked, args) {
+      command = invoked;
+      argv = args;
+      return { status: 0, stdout: JSON.stringify({ run_id: 'run_abc123_def456' }) };
+    },
+  });
+  assert.strictEqual(result.status, 'prepared_waiting_for_exact_dispatch_approval');
+  assert.strictEqual(command, wrapper);
+  assert.deepStrictEqual(argv.slice(0, 3), ['sdtk-agent', 'run', 'start']);
 });

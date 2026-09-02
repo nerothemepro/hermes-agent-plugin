@@ -114,6 +114,8 @@ test('kickoff resolves the active staged toolchain before the global CLI', (t) =
   fs.writeFileSync(wrapper, '#!/usr/bin/env bash\n');
   fs.mkdirSync(toolchainRoot, { recursive: true });
   fs.writeFileSync(path.join(toolchainRoot, 'active-release'), 'self-service-r3\n');
+  fs.mkdirSync(path.join(toolchainRoot, 'releases', 'self-service-r3'), { recursive: true });
+  fs.writeFileSync(path.join(toolchainRoot, 'releases', 'self-service-r3', 'release.json'), '{}');
   fs.writeFileSync(path.join(f.registry, f.runId + '.json'), JSON.stringify({ run_id: f.runId, episode_manifest_sha256: 'c'.repeat(64) }));
   process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = toolchainRoot;
   let command;

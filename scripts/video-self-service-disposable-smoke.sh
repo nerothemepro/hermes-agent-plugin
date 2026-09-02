@@ -18,6 +18,13 @@ test -x "$release_dir/node_modules/.bin/sdtk-agent" || { echo "staged sdtk-agent
 root="$(mktemp -d /tmp/sdtk-video-self-service-e2e-XXXXXX)"
 project="$root/project"
 mkdir -p "$project"
+mkdir -p "$project/.sdtk/agent-runtime/runs" "$root/registry"
+prepare_json="$(HERSOCIAL_AUTO_POST_ENABLED=false SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT="$staging_root" SDTK_VIDEO_SELF_SERVICE_PROJECT_PATH="$project" SDTK_VIDEO_SELF_SERVICE_REGISTRY_DIR="$root/registry" node "$script_dir/bin/hermes-video-self-service" prepare EP2)"
+printf '%s\n' "$prepare_json" > "$root/prepare.json"
+prepared_run_id="$(printf '%s' "$prepare_json" | node -pe 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")); if(p.status!=="prepared_waiting_for_exact_dispatch_approval") process.exit(1); p.run_id')"
+HERSOCIAL_AUTO_POST_ENABLED=false SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT="$staging_root" SDTK_VIDEO_SELF_SERVICE_PROJECT_PATH="$project" SDTK_VIDEO_SELF_SERVICE_REGISTRY_DIR="$root/registry" node "$script_dir/bin/hermes-video-self-service" cancel "$prepared_run_id" > "$root/prepare-cancel.json"
+prepared_status="$(SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT="$staging_root" "$wrapper" sdtk-agent run status --project-path "$project" --run-id "$prepared_run_id" --json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).status')"
+test "$prepared_status" = "cancelled"
 cat > "$root/workflow.json" <<'JSON'
 {"schema_version":"sdtk.agent-workflow.v1","workflow_id":"self_service_disposable_smoke","stages":[
 {"id":"script_package","type":"task","role":"worker","params":{"episode_manifest_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},

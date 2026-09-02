@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
+const { activeAgentCommand } = require('./hermesControlPlaneToolchain');
 
 const { EP2_TEMPLATE_ID } = require('./hermesControlPlaneEp2');
 const { isTerminalRunStatus } = require('./runStatus');
@@ -84,10 +85,12 @@ function prepareTemplate(templateId, rawParams, options = {}) {
   fs.writeFileSync(workflowPath, JSON.stringify(preview.workflow, null, 2) + '\n', { mode: 0o600 });
   fs.writeFileSync(runtimeMapPath, JSON.stringify(preview.runtime_map, null, 2) + '\n', { mode: 0o600 });
   const env = { ...process.env };
+  const commandRunner = options.commandRunner || childProcess.spawnSync;
+  const [command, ...prefix] = activeAgentCommand(projectPath);
   delete env.HERMES_KANBAN_HOME;
 
   try {
-    const result = childProcess.spawnSync('sdtk-agent', [
+    const result = commandRunner(command, [...prefix,
       'run', 'start',
       '--workflow', workflowPath,
       '--runtime-map', runtimeMapPath,
