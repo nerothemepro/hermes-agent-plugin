@@ -87,7 +87,7 @@ Each episode must resolve to one immutable manifest containing:
   "quality_profile": "evidence_bound_explainer_r1",
   "toolchain": {
     "sdtk_marketing": "0.19.0",
-    "sdtk_agent": "0.5.4"
+    "sdtk_agent": "0.5.6"
   },
   "allowed_roles": ["researcher", "wiki", "orchestrator", "developer", "video", "social"]
 }

@@ -17,7 +17,7 @@ function fixture() {
     schema_version: 'sdtk.marketing-video-episode.v1', episode_id: 'EP2', revision: 'r1', title: 'Usage', language: 'en',
     pain_point: 'Unknown cost', story: 'Proof', cta: 'https://sdtk.dev/', workflow_template: 'marketing_video_episode_r1', quality_profile: 'evidence_bound_explainer_r1',
     product_proof: ['real command'], source_boundaries: ['demo only'], allowed_roles: ['researcher', 'video'],
-    toolchain: { sdtk_marketing: '0.19.0', sdtk_agent: '0.5.4', hermes_adapter: '0.3.13' }, capture_contract: { mode: 'terminal', instruction: 'real terminal' },
+    toolchain: { sdtk_marketing: '0.19.0', sdtk_agent: '0.5.6', hermes_adapter: '0.3.14' }, capture_contract: { mode: 'terminal', instruction: 'real terminal' },
   };
   fs.writeFileSync(path.join(manifests, 'EP2.r1.json'), JSON.stringify(manifest));
   const policy = { schema_version: 'sdtk.marketing-video-toolchain-policy.v1', quality_profiles: ['evidence_bound_explainer_r1'], required_tools: ['node', 'ffmpeg'], role_profiles: { researcher: 'herresearch', video: 'hervid' }, publish_policy: { external_publish: false, require_auto_post_disabled: true } };
@@ -27,7 +27,7 @@ function fixture() {
 }
 
 function passingRunner() { return { status: 0, stdout: 'ok\n', stderr: '' }; }
-function versions(name) { return { 'sdtk-marketing-kit': '0.19.0', 'sdtk-agent-kit': '0.5.4', 'sdtk-agent-hermes-adapter': '0.3.13' }[name] || null; }
+function versions(name) { return { 'sdtk-marketing-kit': '0.19.0', 'sdtk-agent-kit': '0.5.6', 'sdtk-agent-hermes-adapter': '0.3.14' }[name] || null; }
 
 test('preflight is read-only, hashes its bounded packet, and passes only exact context', (t) => {
   const f = fixture();

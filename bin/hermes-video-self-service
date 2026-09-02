@@ -1,28 +1,37 @@
 #!/usr/bin/env node
 'use strict';
 
-const { kickoff, prepare, status } = require('../control-plane/video-self-service/controller');
+const { approveGate, cancel, gatePacket, kickoff, prepare, reconcile, recover, rejectGate, status } = require('../control-plane/video-self-service/controller');
 
 const EPISODE_PATTERN = /^EP[2-4]$/;
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const GATE_PATTERN = /^(story_lock|picture_lock|publish)$/;
+const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,48}$/;
+const TASK_ID_PATTERN = /^[a-z][a-z0-9_]{2,80}$/;
 
 function parse(argv) {
   const [command, ...rest] = argv;
   if (command === 'prepare' && rest.length === 1 && EPISODE_PATTERN.test(rest[0])) return { command, episode: rest[0] };
   if (command === 'status' && rest.length === 1 && RUN_ID_PATTERN.test(rest[0])) return { command, runId: rest[0] };
   if (command === 'kickoff' && rest.length === 2 && RUN_ID_PATTERN.test(rest[0]) && SHA256_PATTERN.test(rest[1])) return { command, runId: rest[0], manifestSha256: rest[1] };
-  throw new Error('Exact syntax required: prepare EP2|EP3|EP4 | status <run_id> | kickoff <run_id> <manifest_sha256>');
+  if (command === 'packet' && rest.length === 2 && RUN_ID_PATTERN.test(rest[0]) && GATE_PATTERN.test(rest[1])) return { command, runId: rest[0], gateId: rest[1] };
+  if (command === 'approve-gate' && rest.length === 3 && RUN_ID_PATTERN.test(rest[0]) && GATE_PATTERN.test(rest[1]) && SHA256_PATTERN.test(rest[2])) return { command, runId: rest[0], gateId: rest[1], packetSha256: rest[2] };
+  if (command === 'reject-gate' && rest.length === 3 && RUN_ID_PATTERN.test(rest[0]) && GATE_PATTERN.test(rest[1]) && REASON_CODE_PATTERN.test(rest[2])) return { command, runId: rest[0], gateId: rest[1], reasonCode: rest[2] };
+  if (command === 'cancel' && rest.length === 1 && RUN_ID_PATTERN.test(rest[0])) return { command, runId: rest[0] };
+  if (command === 'reconcile' && rest.length === 1 && RUN_ID_PATTERN.test(rest[0])) return { command, runId: rest[0] };
+  if (command === 'recover' && rest.length === 2 && RUN_ID_PATTERN.test(rest[0]) && TASK_ID_PATTERN.test(rest[1])) return { command, runId: rest[0], taskId: rest[1] };
+  throw new Error('Exact syntax required: prepare EP2|EP3|EP4 | status <run_id> | kickoff <run_id> <manifest_sha256> | packet <run_id> story_lock|picture_lock|publish | approve-gate <run_id> story_lock|picture_lock|publish <packet_sha256> | reject-gate <run_id> story_lock|picture_lock|publish <REASON_CODE> | cancel <run_id> | reconcile <run_id> | recover <run_id> <task_id>');
 }
 
 function main() {
   const args = parse(process.argv.slice(2));
-  let result;
-  if (args.command === 'prepare') result = prepare({ episode: args.episode });
-  else if (args.command === 'status') result = status({ runId: args.runId });
-  else result = kickoff(args);
+  const handlers = { prepare, status, kickoff, packet: gatePacket, 'approve-gate': approveGate, 'reject-gate': rejectGate, cancel, reconcile, recover };
+  const result = handlers[args.command](args);
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   if (result.status === 'preflight_failed') process.exitCode = 1;
 }
 
 try { main(); } catch (error) { process.stderr.write(JSON.stringify({ status: 'error', error: error.message }) + '\n'); process.exitCode = 1; }
+
+module.exports = { parse };
