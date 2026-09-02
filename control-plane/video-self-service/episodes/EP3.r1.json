@@ -24,7 +24,7 @@
     "sdtk_agent": "0.5.6",
     "sdtk_brain": "0.4.2",
     "sdtk_wiki": "0.25.0",
-    "hermes_adapter": "0.3.14"
+    "hermes_adapter": "0.3.15"
   },
   "allowed_roles": [
     "researcher",

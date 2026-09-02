@@ -88,6 +88,11 @@ test('EP2 usage template builds the fixed multi-profile, human-gated workflow', 
   assert.strictEqual(preview.runtime_map.roles.video.config.profile, 'hervid');
   assert.strictEqual(preview.runtime_map.roles.wiki.config.workspace, 'project_path');
   assert.match(preview.workflow.stages.find((stage) => stage.id === 'episode_lessons').params.instruction, /project-local SDTK-WIKI/);
+  assert.deepStrictEqual(preview.workflow.stages.find((stage) => stage.id === "episode_lessons").params.evidence_contract, {
+    schema_version: "sdtk.hermes-evidence-contract.v1",
+    required_text: ["EP2", "See Your Real AI Cost in One Command"],
+    require_structured_findings: true,
+  });
   assert.throws(() => previewTemplate('marketing_video_ep_usage', '{"topic":"freeform"}', { templateRoot: TEMPLATE_ROOT }), /Unknown or forbidden/);
   assert.strictEqual(preview.cost_band, 'medium');
   assert.match(preview.workflow.stages.find((stage) => stage.id === 'script_package').params.instruction, /See Your Real AI Cost in One Command/);

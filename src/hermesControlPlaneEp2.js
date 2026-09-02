@@ -43,7 +43,7 @@ function instruction(stage, projectPath, episode) {
     case 'research_evidence':
       return `Build a bounded public evidence pack for ${identity}. Pain point: ${episode.dogfood.pain_point} Separate supported public facts, source URLs, observations, unknowns, and claims that must not be used. Do not claim product outcomes or metrics without direct evidence. Use one structured finding per supported claim. ${shared}`;
     case 'episode_lessons':
-      return `Work from the controller project workspace at ${projectPath}. Retrieve only accepted lessons relevant to ${identity}: product capture dominance, narration, readable layout, honest claims, motion, and attended publishing. Search the project-local SDTK-WIKI first, including docs/HERMES_GENVIDEO_RUNBOOK.md and docs/HERMES_GENVIDEO_IMPROVEMENT_PLAN.md when present. Cite canonical local artifact paths used. Return unknown when no accepted lesson exists. ${shared}`;
+      return `Work from the controller project workspace at ${projectPath}. Retrieve only accepted lessons relevant to ${identity}: product capture dominance, narration, readable layout, honest claims, motion, and attended publishing. Search the project-local SDTK-WIKI first, including docs/HERMES_GENVIDEO_RUNBOOK.md and docs/HERMES_GENVIDEO_IMPROVEMENT_PLAN.md when present. Cite canonical local artifact paths used. Return unknown when no accepted lesson exists. Your summary and each finding claim must identify ${identity}. ${shared}`;
     case 'script_package':
       return `Synthesize the English script package for ${identity} from completed evidence and lessons. Required product proof: ${episode.dogfood.product_proof} Include claim ledger, shot list, narration draft, CTA ${episode.dogfood.cta}, and a list of evidence files expected under ${outputRoot}. Do not render, publish, or approve anything. ${shared}`;
     case 'product_capture':
@@ -85,6 +85,13 @@ function buildEp2Workflow(projectPath, episodeId = 'EP2', options = {}) {
         episode_revision: episode.episode_manifest.revision,
         episode_manifest_sha256: episode.episode_manifest_sha256,
       });
+      if (stage.id === "episode_lessons") {
+        stage.params.evidence_contract = {
+          schema_version: "sdtk.hermes-evidence-contract.v1",
+          required_text: [episode.episode, episode.title],
+          require_structured_findings: true,
+        };
+      }
     }
   }
   return workflow;
