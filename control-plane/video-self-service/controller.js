@@ -7,6 +7,7 @@ const childProcess = require('child_process');
 const { preflightEpisode } = require('./preflight');
 const { normalizeRunState } = require('./normalized-state');
 const { prepareTemplate } = require('../../src/hermesControlPlanePrepare');
+const { activeAgentCommand } = require('../../src/hermesControlPlaneToolchain');
 
 const RUN_ID_PATTERN = /^run_[a-z0-9]+_[a-z0-9]+$/;
 const DEFAULT_PROJECT_PATH = process.env.SDTK_VIDEO_SELF_SERVICE_PROJECT_PATH || '/workspace/hermes-agent-plugin';
@@ -17,7 +18,6 @@ const GATE_ALIASES = Object.freeze({
   publish: 'owner_publish_approval',
 });
 const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,48}$/;
-const DEFAULT_TOOLCHAIN_ROOT = "/opt/data/hermes/control-plane/video-dogfood/toolchain";
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function requireRunId(runId) { if (!RUN_ID_PATTERN.test(String(runId || ''))) throw new Error('invalid run id'); return runId; }
@@ -47,13 +47,6 @@ function taskRecord(state, taskId) {
   const task = state && state.tasks && state.tasks[taskId];
   if (!task || typeof task !== 'object') throw new Error('unknown task id');
   return task;
-}
-function activeAgentCommand(projectPath) {
-  const toolchainRoot = process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT || DEFAULT_TOOLCHAIN_ROOT;
-  const pointer = path.join(toolchainRoot, "active-release");
-  const wrapper = path.join(path.resolve(projectPath), "control-plane", "video-dogfood", "staging", "with-active-toolchain.sh");
-  if (fs.existsSync(pointer) && fs.existsSync(wrapper)) return [wrapper, "sdtk-agent"];
-  return ["sdtk-agent"];
 }
 function runCommand(commandRunner, args, projectPath) {
   const [command, ...prefix] = activeAgentCommand(projectPath);

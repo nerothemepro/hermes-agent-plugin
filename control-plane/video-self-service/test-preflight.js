@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const test = require('node:test');
-const { preflightEpisode } = require('./preflight');
+const { DEFAULT_HERMES_BIN, preflightEpisode } = require('./preflight');
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'video-preflight-'));
@@ -33,7 +33,7 @@ test('preflight is read-only, hashes its bounded packet, and passes only exact c
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
   const before = fs.readdirSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs'));
-  const packet = preflightEpisode({ projectPath: f.project, episode: 'EP2', episodeManifestRoot: f.manifests, policyPath: f.policyPath, env: { HERSOCIAL_AUTO_POST_ENABLED: 'false' } }, { commandRunner: passingRunner, packageVersionResolver: versions });
+  const packet = preflightEpisode({ projectPath: f.project, episode: 'EP2', episodeManifestRoot: f.manifests, policyPath: f.policyPath, env: { HERSOCIAL_AUTO_POST_ENABLED: 'false', SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT: path.join(f.root, 'no-active-toolchain') } }, { commandRunner: passingRunner, packageVersionResolver: versions });
   assert.equal(packet.ok, true);
   assert.match(packet.preflight_sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(fs.readdirSync(path.join(f.project, '.sdtk', 'agent-runtime', 'runs')), before);
@@ -46,8 +46,8 @@ test('preflight fails closed for stale package, profile/tool failure, auto publi
   fs.mkdirSync(runPath, { recursive: true });
   fs.writeFileSync(path.join(runPath, 'state.json'), JSON.stringify({ run_id: 'run_aaaa_bbbb', status: 'running', episode_id: 'EP2', episode_revision: 'r1', tasks: {} }));
   fs.writeFileSync(path.join(runPath, 'workflow.json'), JSON.stringify({ stages: [{ type: 'task', params: { episode_id: 'EP2', episode_revision: 'r1' } }] }));
-  const packet = preflightEpisode({ projectPath: f.project, episode: 'EP2', episodeManifestRoot: f.manifests, policyPath: f.policyPath, env: { HERSOCIAL_AUTO_POST_ENABLED: 'true' } }, {
-    commandRunner(command, args) { return command === 'hermes' && args.includes('hervid') ? { status: 1, stderr: 'profile missing' } : passingRunner(); },
+  const packet = preflightEpisode({ projectPath: f.project, episode: 'EP2', episodeManifestRoot: f.manifests, policyPath: f.policyPath, env: { HERSOCIAL_AUTO_POST_ENABLED: 'true', SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT: path.join(f.root, 'no-active-toolchain') } }, {
+    commandRunner(command, _args, options) { return command === DEFAULT_HERMES_BIN && options.env.HERMES_HOME.endsWith('hervid') ? { status: 1, stderr: 'profile missing' } : passingRunner(); },
     packageVersionResolver(name) { return name === 'sdtk-agent-kit' ? '0.0.0' : versions(name); },
   });
   assert.equal(packet.ok, false);
@@ -55,4 +55,35 @@ test('preflight fails closed for stale package, profile/tool failure, auto publi
   assert.equal(packet.checks.find((c) => c.name === 'package:sdtk-agent-kit').ok, false);
   assert.equal(packet.checks.find((c) => c.name === 'role:video').ok, false);
   assert.equal(packet.checks.find((c) => c.name === 'publish_disabled').ok, false);
+});
+
+test('preflight resolves staged agent packages and PATH before global versions', (t) => {
+  const f = fixture();
+  const toolchain = path.join(f.root, 'toolchain');
+  const release = path.join(toolchain, 'releases', 'self-service-r3');
+  const previous = process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+  t.after(() => {
+    fs.rmSync(f.root, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT;
+    else process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = previous;
+  });
+  for (const [name, version] of [['sdtk-agent-kit', '0.5.6'], ['sdtk-agent-hermes-adapter', '0.3.14']]) {
+    const packageDir = path.join(release, 'node_modules', name);
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name, version }));
+  }
+  fs.mkdirSync(path.join(release, 'node_modules', '.bin'), { recursive: true });
+  fs.writeFileSync(path.join(release, 'release.json'), '{}');
+  fs.mkdirSync(toolchain, { recursive: true });
+  fs.writeFileSync(path.join(toolchain, 'active-release'), 'self-service-r3\n');
+  process.env.SDTK_VIDEO_DOGFOOD_TOOLCHAIN_ROOT = toolchain;
+  let commandEnv;
+  const packet = preflightEpisode({ projectPath: f.project, episode: 'EP2', episodeManifestRoot: f.manifests, policyPath: f.policyPath, env: { HERSOCIAL_AUTO_POST_ENABLED: 'false' } }, {
+    commandRunner(_command, _args, options) { commandEnv = options.env; return passingRunner(); },
+    packageVersionResolver(name) { return name === 'sdtk-marketing-kit' ? '0.19.0' : 'GLOBAL_WRONG'; },
+  });
+  assert.equal(packet.ok, true);
+  assert.equal(packet.checks.find((item) => item.name === 'package:sdtk-agent-kit').actual, '0.5.6');
+  assert.equal(packet.checks.find((item) => item.name === 'package:sdtk-agent-hermes-adapter').actual, '0.3.14');
+  assert.ok(commandEnv.PATH.startsWith(path.join(release, 'node_modules', '.bin') + ':'));
 });
