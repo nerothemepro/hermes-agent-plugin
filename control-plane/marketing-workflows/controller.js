@@ -77,6 +77,44 @@ class MarketingWorkflowController {
 
   status(runId) { return this.kernel.currentState(runId); }
 
+  nextTask(runId) {
+    const state = this.kernel.currentState(runId);
+    return { state, task_id: this._expectedTask(state) };
+  }
+
+  registerExternalTask(input) {
+    const state = this.kernel.currentState(input.runId);
+    const expectedTask = this._expectedTask(state);
+    const attempt = Number(input.attempt);
+    const nativeTaskId = String(input.nativeTaskId || '');
+    const idempotencyKey = String(input.idempotencyKey || '');
+    const board = String(input.board || '');
+    if (!Number.isInteger(attempt) || attempt < 1 || !/^t_[a-z0-9_]+$/.test(nativeTaskId) || !/^sdtk-marketing:[a-z0-9_-]+:[a-z0-9_-]+:[1-9][0-9]*$/.test(idempotencyKey) || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(board)) {
+      throw new Error('invalid external task mapping');
+    }
+    const existing = state.tasks[input.taskId];
+    if (existing?.status === 'external_registered' || existing?.status === 'external_released') {
+      if (existing.attempt !== attempt || existing.native_task_id !== nativeTaskId || existing.idempotency_key !== idempotencyKey || existing.board !== board) throw new Error('external task mapping conflict');
+      return { status: 'duplicate', state };
+    }
+    if (state.status !== 'ready' || input.taskId !== expectedTask) throw new Error(`expected task ${expectedTask}`);
+    this.kernel.appendEvent(input.runId, 'task_external_registered', {
+      task_id: input.taskId, attempt, native_task_id: nativeTaskId, idempotency_key: idempotencyKey, board,
+    }, { expectedRevision: state.revision });
+    return { status: 'registered', state: this.kernel.currentState(input.runId) };
+  }
+
+  releaseExternalTask(input) {
+    const state = this.kernel.currentState(input.runId);
+    const task = state.tasks[input.taskId];
+    const attempt = Number(input.attempt);
+    if (!task || task.attempt !== attempt || task.native_task_id !== input.nativeTaskId) throw new Error('external task mapping is missing');
+    if (task.status === 'external_released') return { status: 'duplicate', state };
+    if (task.status !== 'external_registered') throw new Error('external task cannot be released');
+    this.kernel.appendEvent(input.runId, 'task_external_released', { task_id: input.taskId, attempt, native_task_id: input.nativeTaskId }, { expectedRevision: state.revision });
+    return { status: 'released', state: this.kernel.currentState(input.runId) };
+  }
+
   cancel(input) {
     const request = typeof input === 'string' ? { runId: input } : input || {};
     if (request.commandId) {
@@ -122,6 +160,12 @@ class MarketingWorkflowController {
     const step = this._step(state, taskId);
     if (state.tasks[taskId]?.status !== 'running') throw new Error('task is not running');
     const finalized = finalizeTaskResult(input.candidate, { root: path.join(this.artifactRoot, input.runId), expected: { run_id: input.runId, task_id: taskId, attempt: state.tasks[taskId].attempt } });
+    if (finalized.status === 'failed') {
+      const errorClass = String(finalized.error?.error_class || 'RECOVERABLE_WORKER');
+      if (!/^[A-Z][A-Z0-9_]{2,48}$/.test(errorClass)) throw new Error('invalid worker error class');
+      this.kernel.appendEvent(input.runId, 'task_failed', { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256, error_class: errorClass }, { expectedRevision: state.revision });
+      return { state: this.kernel.currentState(input.runId), packet_sha256: null, result: finalized };
+    }
     const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256 } }];
     let packetSha = null;
     if (step.gate) {
