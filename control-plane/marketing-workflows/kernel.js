@@ -5,7 +5,7 @@ const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
 
 const WORKFLOWS = new Set(['research_and_story', 'video_production', 'social_distribution']);
-const EVENT_TYPES = new Set(['run_prepared', 'kickoff_waiting', 'kickoff_approved', 'task_started', 'task_completed', 'task_failed', 'gate_waiting', 'gate_approved', 'gate_rejected', 'run_cancelled', 'run_rejected', 'run_completed']);
+const EVENT_TYPES = new Set(['run_prepared', 'kickoff_waiting', 'kickoff_approved', 'task_external_registered', 'task_external_released', 'task_started', 'task_completed', 'task_failed', 'gate_waiting', 'gate_approved', 'gate_rejected', 'run_cancelled', 'run_rejected', 'run_completed']);
 
 function requireText(value, name) {
   const result = String(value || '').trim();
@@ -26,14 +26,26 @@ function reduceEvent(state, event) {
   } else if (event.type === 'kickoff_approved') {
     delete next.kickoff_packet_sha256;
     next.status = 'ready';
+  } else if (event.type === 'task_external_registered') {
+    next.status = 'dispatching';
+    next.tasks[event.payload.task_id] = {
+      status: 'external_registered',
+      attempt: event.payload.attempt,
+      native_task_id: event.payload.native_task_id,
+      idempotency_key: event.payload.idempotency_key,
+      board: event.payload.board,
+    };
+  } else if (event.type === 'task_external_released') {
+    next.status = 'external_pending';
+    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'external_released', attempt: event.payload.attempt };
   } else if (event.type === 'task_started') {
     next.status = 'running';
-    next.tasks[event.payload.task_id] = { status: 'running', attempt: event.payload.attempt };
+    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'running', attempt: event.payload.attempt };
   } else if (event.type === 'task_completed') {
-    next.tasks[event.payload.task_id] = { status: 'completed', attempt: event.payload.attempt };
+    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'completed', attempt: event.payload.attempt, envelope_sha256: event.payload.envelope_sha256 };
   } else if (event.type === 'task_failed') {
     next.status = 'blocked';
-    next.tasks[event.payload.task_id] = { status: 'failed', attempt: event.payload.attempt, error_class: event.payload.error_class };
+    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'failed', attempt: event.payload.attempt, envelope_sha256: event.payload.envelope_sha256, error_class: event.payload.error_class };
   } else if (event.type === 'gate_waiting') {
     next.status = 'waiting_for_approval';
     next.waiting_gate = event.payload.gate_id;

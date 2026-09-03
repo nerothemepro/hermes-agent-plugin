@@ -134,3 +134,24 @@ test('owner cancellation records one event and a repeated Telegram command is a 
     assert.strictEqual(duplicate.state.revision, cancelled.state.revision);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+test('failed worker evidence blocks the run and never opens an owner gate', () => {
+  const env = setup();
+  try {
+    const handoff = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) } };
+    const runId = 'run_video_failed_1';
+    env.controller.prepare({ commandId: 'tg:video:failed', workflow: 'video_production', runId, input: handoff });
+    env.controller.startTask({ runId, taskId: 'capture_assets', workerId: 'hervid:1' });
+    const result = artifactResult(path.join(env.root, 'artifacts'), runId, 'capture_assets', 'capture-failure.json');
+    result.status = 'failed';
+    result.validation.status = 'fail';
+    result.error = { error_class: 'TOOL_DEFECT' };
+    const blocked = env.controller.completeTask({ runId, candidate: result });
+    assert.strictEqual(blocked.packet_sha256, null);
+    assert.strictEqual(blocked.state.status, 'blocked');
+    assert.strictEqual(blocked.state.waiting_gate, undefined);
+    assert.strictEqual(blocked.state.tasks.capture_assets.status, 'failed');
+    assert.strictEqual(blocked.state.tasks.capture_assets.error_class, 'TOOL_DEFECT');
+    assert.match(blocked.state.tasks.capture_assets.envelope_sha256, /^[a-f0-9]{64}$/);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
