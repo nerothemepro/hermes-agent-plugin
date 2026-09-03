@@ -17,3 +17,11 @@ test('parser fails closed on partial, extra, or natural-language commands', () =
     assert.throws(() => parseTelegramCommand(value), /exact Telegram marketing command required/);
   }
 });
+
+test('parser accepts exact owner rejection grammar with a bounded reason code', () => {
+  assert.deepStrictEqual(
+    parseTelegramCommand('REJECT STORY LOCK run_alpha_123456 CLAIM_EVIDENCE_MISSING'),
+    { action: 'reject_gate', workflow: 'research_and_story', run_id: 'run_alpha_123456', gate_id: 'story_lock', reason_code: 'CLAIM_EVIDENCE_MISSING' },
+  );
+  assert.throws(() => parseTelegramCommand('REJECT STORY LOCK run_alpha_123456 reason in prose'), /exact Telegram marketing command required/);
+});

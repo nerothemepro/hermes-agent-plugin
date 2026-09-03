@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+'use strict';
+
+const { main } = require('../control-plane/marketing-workflows/cli-entrypoint');
+
+try {
+  main();
+} catch (error) {
+  process.stderr.write(`${JSON.stringify({ status: 'error', error: error.message })}\n`);
+  process.exitCode = 1;
+}
