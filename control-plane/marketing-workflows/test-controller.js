@@ -59,3 +59,78 @@ test('video tasks execute in order across asset and picture-lock gates', () => {
     assert.strictEqual(env.controller.cancel('run_video_200').status, 'cancelled');
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+test('research prepare waits for a SHA-pinned kickoff and treats a duplicate owner command as a no-op', () => {
+  const env = setup();
+  try {
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:1', workflow: 'research_and_story', runId: 'run_research_200', input: { episode_id: 'EP4' } });
+    assert.strictEqual(prepared.status, 'awaiting_kickoff');
+    assert.match(prepared.kickoff_packet_sha256, /^[a-f0-9]{64}$/);
+    assert.strictEqual(env.controller.status(prepared.run_id).revision, 2);
+    assert.throws(() => env.controller.approveKickoff({ commandId: 'tg:kickoff:1', runId: prepared.run_id, packetSha256: '0'.repeat(64) }), /packet sha256 mismatch/);
+
+    const accepted = env.controller.approveKickoff({ commandId: 'tg:kickoff:1', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    assert.strictEqual(accepted.status, 'ready_for_worker_dispatch');
+    assert.strictEqual(accepted.state.status, 'ready');
+    const duplicate = env.controller.approveKickoff({ commandId: 'tg:kickoff:1', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    assert.strictEqual(duplicate.status, 'duplicate');
+    assert.strictEqual(duplicate.state.revision, accepted.state.revision);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+test('owner gate approval is idempotent when Telegram repeats the same command id', () => {
+  const env = setup();
+  try {
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:gate', workflow: 'research_and_story', runId: 'run_research_201', input: { episode_id: 'EP4' } });
+    env.controller.approveKickoff({ commandId: 'tg:kickoff:gate', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    env.controller.startTask({ runId: prepared.run_id, taskId: 'research_story', workerId: 'herresearch:1' });
+    const waiting = env.controller.completeTask({ runId: prepared.run_id, candidate: artifactResult(path.join(env.root, 'artifacts'), prepared.run_id, 'research_story', 'production-brief.json') });
+    const approved = env.controller.approveGate({ commandId: 'tg:story-lock:1', runId: prepared.run_id, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
+    assert.strictEqual(approved.state.status, 'completed');
+    const duplicate = env.controller.approveGate({ commandId: 'tg:story-lock:1', runId: prepared.run_id, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
+    assert.strictEqual(duplicate.status, 'duplicate');
+    assert.strictEqual(duplicate.state.revision, approved.state.revision);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+test('social preparation accepts only a video handoff bound to the approved research brief', () => {
+  const env = setup();
+  try {
+    const brief = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) } };
+    const video = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'video_production', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', approval: { gate: 'picture_lock', status: 'approved', artifact_sha256: 'b'.repeat(64) }, inputs: [{ sha256: 'a'.repeat(64) }] };
+    const prepared = env.controller.prepare({ commandId: 'tg:social:1', workflow: 'social_distribution', runId: 'run_social_300', input: { brief, video } });
+    assert.strictEqual(prepared.status, 'awaiting_kickoff');
+    assert.throws(() => env.controller.prepare({ commandId: 'tg:social:2', workflow: 'social_distribution', runId: 'run_social_301', input: { brief, video: { ...video, inputs: [] } } }), /bound to approved research brief/);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+test('owner gate rejection is durable and idempotent without deleting the submitted artifacts', () => {
+  const env = setup();
+  try {
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:reject', workflow: 'research_and_story', runId: 'run_research_202', input: { episode_id: 'EP4' } });
+    env.controller.approveKickoff({ commandId: 'tg:kickoff:reject', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    env.controller.startTask({ runId: prepared.run_id, taskId: 'research_story', workerId: 'herresearch:1' });
+    const candidate = artifactResult(path.join(env.root, 'artifacts'), prepared.run_id, 'research_story', 'production-brief.json');
+    const waiting = env.controller.completeTask({ runId: prepared.run_id, candidate });
+    const rejected = env.controller.rejectGate({ commandId: 'tg:reject:1', runId: prepared.run_id, gateId: 'story_lock', reasonCode: 'CLAIM_EVIDENCE_MISSING' });
+    assert.strictEqual(rejected.state.status, 'rejected');
+    assert.ok(fs.existsSync(path.join(env.root, 'artifacts', prepared.run_id, 'production-brief.json')));
+    const duplicate = env.controller.rejectGate({ commandId: 'tg:reject:1', runId: prepared.run_id, gateId: 'story_lock', reasonCode: 'CLAIM_EVIDENCE_MISSING' });
+    assert.strictEqual(duplicate.status, 'duplicate');
+    assert.strictEqual(duplicate.state.revision, rejected.state.revision);
+    assert.notStrictEqual(waiting.packet_sha256, '');
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+test('owner cancellation records one event and a repeated Telegram command is a no-op', () => {
+  const env = setup();
+  try {
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:cancel', workflow: 'research_and_story', runId: 'run_research_203', input: { episode_id: 'EP4' } });
+    const cancelled = env.controller.cancel({ commandId: 'tg:cancel:1', runId: prepared.run_id });
+    assert.strictEqual(cancelled.status, 'cancelled');
+    assert.strictEqual(cancelled.state.status, 'cancelled');
+    const duplicate = env.controller.cancel({ commandId: 'tg:cancel:1', runId: prepared.run_id });
+    assert.strictEqual(duplicate.status, 'duplicate');
+    assert.strictEqual(duplicate.state.revision, cancelled.state.revision);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});

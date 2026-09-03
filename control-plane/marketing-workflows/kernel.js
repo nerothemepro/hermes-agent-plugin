@@ -5,7 +5,7 @@ const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
 
 const WORKFLOWS = new Set(['research_and_story', 'video_production', 'social_distribution']);
-const EVENT_TYPES = new Set(['run_prepared', 'task_started', 'task_completed', 'task_failed', 'gate_waiting', 'gate_approved', 'run_cancelled', 'run_completed']);
+const EVENT_TYPES = new Set(['run_prepared', 'kickoff_waiting', 'kickoff_approved', 'task_started', 'task_completed', 'task_failed', 'gate_waiting', 'gate_approved', 'gate_rejected', 'run_cancelled', 'run_rejected', 'run_completed']);
 
 function requireText(value, name) {
   const result = String(value || '').trim();
@@ -20,7 +20,13 @@ function reduceEvent(state, event) {
     return { run_id: event.run_id, workflow: event.payload.workflow, status: 'prepared', revision: event.sequence, tasks: {} };
   }
   if (!next) throw new Error('run is not initialized');
-  if (event.type === 'task_started') {
+  if (event.type === 'kickoff_waiting') {
+    next.status = 'awaiting_kickoff';
+    next.kickoff_packet_sha256 = event.payload.packet_sha256;
+  } else if (event.type === 'kickoff_approved') {
+    delete next.kickoff_packet_sha256;
+    next.status = 'ready';
+  } else if (event.type === 'task_started') {
     next.status = 'running';
     next.tasks[event.payload.task_id] = { status: 'running', attempt: event.payload.attempt };
   } else if (event.type === 'task_completed') {
@@ -36,10 +42,16 @@ function reduceEvent(state, event) {
     delete next.waiting_gate;
     delete next.packet_sha256;
     next.status = 'running';
+  } else if (event.type === 'gate_rejected') {
+    delete next.waiting_gate;
+    delete next.packet_sha256;
+    next.rejection = { gate_id: event.payload.gate_id, reason_code: event.payload.reason_code };
   } else if (event.type === 'run_cancelled') {
     next.status = 'cancelled';
   } else if (event.type === 'run_completed') {
     next.status = 'completed';
+  } else if (event.type === 'run_rejected') {
+    next.status = 'rejected';
   }
   next.revision = event.sequence;
   return next;
@@ -77,21 +89,43 @@ class WorkflowKernel {
   close() { this.db.close(); }
 
   acceptCommand(input) {
+    const workflow = requireText(input.workflow, 'workflow');
+    return this.commitCommand({
+      commandId: input.commandId,
+      workflow,
+      runId: input.runId,
+      payload: input.payload || {},
+      expectedRevision: 0,
+      initialize: true,
+      events: [{ type: 'run_prepared', payload: { workflow } }, ...(input.initialEvents || [])],
+    });
+  }
+
+  commitCommand(input) {
     const commandId = requireText(input.commandId, 'command id');
     const workflow = requireText(input.workflow, 'workflow');
     const runId = requireText(input.runId, 'run id');
     if (!WORKFLOWS.has(workflow)) throw new Error('unsupported workflow');
+    if (!Array.isArray(input.events) || input.events.length === 0) throw new Error('command events are required');
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const existing = this.db.prepare('SELECT run_id FROM commands WHERE command_id = ?').get(commandId);
+      const existing = this.db.prepare('SELECT run_id, workflow, payload_json FROM commands WHERE command_id = ?').get(commandId);
       if (existing) {
+        if (existing.workflow !== workflow || existing.payload_json !== JSON.stringify(input.payload || {})) {
+          throw new Error('command id conflict');
+        }
         this.db.exec('COMMIT');
         return { duplicate: true, run_id: existing.run_id };
+      }
+      const revision = Number(this.db.prepare('SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?').get(runId).revision);
+      if (input.initialize && revision !== 0) throw new Error('run already initialized');
+      if (input.expectedRevision !== undefined && Number(input.expectedRevision) !== revision) {
+        throw new Error(`revision conflict: expected ${input.expectedRevision}, actual ${revision}`);
       }
       const now = new Date().toISOString();
       this.db.prepare('INSERT INTO commands(command_id, run_id, workflow, payload_json, accepted_at) VALUES (?, ?, ?, ?, ?)')
         .run(commandId, runId, workflow, JSON.stringify(input.payload || {}), now);
-      this._appendEvent(runId, 'run_prepared', { workflow }, now);
+      for (const event of input.events) this._appendEvent(runId, event.type, event.payload, now);
       this.db.exec('COMMIT');
       return { duplicate: false, run_id: runId };
     } catch (error) {
@@ -133,6 +167,12 @@ class WorkflowKernel {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  command(commandIdValue) {
+    const commandId = requireText(commandIdValue, 'command id');
+    const row = this.db.prepare('SELECT command_id, run_id, workflow, payload_json, accepted_at FROM commands WHERE command_id = ?').get(commandId);
+    return row ? { command_id: row.command_id, run_id: row.run_id, workflow: row.workflow, payload: JSON.parse(row.payload_json), accepted_at: row.accepted_at } : null;
   }
 
   events(runIdValue) {

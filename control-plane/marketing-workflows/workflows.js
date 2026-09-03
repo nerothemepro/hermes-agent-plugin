@@ -43,4 +43,16 @@ function validateHandoff(targetWorkflow, handoff) {
   return structuredClone(handoff);
 }
 
-module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff };
+
+function validateSocialInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid social input');
+  const brief = validateHandoff('video_production', input.brief);
+  const video = validateHandoff('social_distribution', input.video);
+  if (brief.episode_id !== video.episode_id || brief.revision !== video.revision) throw new Error('video handoff identity does not match approved research brief');
+  if (!Array.isArray(video.inputs) || !video.inputs.some((item) => item && item.sha256 === brief.approval.artifact_sha256)) {
+    throw new Error('video handoff is not bound to approved research brief');
+  }
+  return { brief, video };
+}
+
+module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff, validateSocialInput };
