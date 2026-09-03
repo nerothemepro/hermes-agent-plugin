@@ -43,7 +43,7 @@ test('status projection is fail-closed', () => {
   assert.deepStrictEqual(statusProjection('created'), { status: 'TODO', reason: '' });
   assert.deepStrictEqual(statusProjection('running_external'), { status: 'IN_PROGRESS', reason: '' });
   assert.deepStrictEqual(statusProjection('completed'), { status: 'DONE', reason: '' });
-  assert.deepStrictEqual(statusProjection('waiting_for_approval'), { status: 'PENDING', reason: 'awaiting owner approval' });
+  assert.deepStrictEqual(statusProjection('waiting_for_approval'), { status: 'IN_REVIEW', reason: 'awaiting owner approval' });
   assert.deepStrictEqual(statusProjection('unknown_vendor_state'), { status: 'PENDING', reason: 'unknown ledger status: unknown_vendor_state' });
 });
 
@@ -84,8 +84,9 @@ test('waiting owner gate and malformed input preserve a prior valid projection',
   try {
     projectKanban({ projectPath: root, runId: run.run_id, seriesManifestPath: SERIES_MANIFEST });
     const planning = fs.readFileSync(path.join(root, 'SHARED_PLANNING.md'), 'utf8');
-    assert.match(planning, /PENDING: awaiting owner approval/);
-    assert.match(planning, /## CURRENT BLOCKERS[\s\S]*Owner script review: awaiting owner approval/);
+    assert.match(planning, /\| 4\. Owner script review \| IN_REVIEW \| Owner \|/);
+    assert.match(planning, /## CURRENT BLOCKERS\nNO BLOCKERS/);
+    assert.doesNotMatch(planning, /Owner script review: awaiting owner approval/);
 
     const before = fs.readFileSync(path.join(root, 'SHARED_PLANNING.md'), 'utf8');
     fs.writeFileSync(statePath, '{not json');
