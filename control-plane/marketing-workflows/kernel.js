@@ -113,14 +113,20 @@ class WorkflowKernel {
   }
 
   appendEvent(runIdValue, type, payload, options = {}) {
+    return this.appendEvents(runIdValue, [{ type, payload }], options);
+  }
+
+  appendEvents(runIdValue, events, options = {}) {
     const runId = requireText(runIdValue, 'run id');
+    if (!Array.isArray(events) || events.length === 0) throw new Error('events are required');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const row = this.db.prepare('SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?').get(runId);
       if (options.expectedRevision !== undefined && Number(options.expectedRevision) !== Number(row.revision)) {
         throw new Error(`revision conflict: expected ${options.expectedRevision}, actual ${row.revision}`);
       }
-      const sequence = this._appendEvent(runId, type, payload);
+      let sequence = Number(row.revision);
+      for (const event of events) sequence = this._appendEvent(runId, event.type, event.payload);
       this.db.exec('COMMIT');
       return { run_id: runId, revision: sequence };
     } catch (error) {
@@ -177,6 +183,11 @@ class WorkflowKernel {
     if (Number.isNaN(now.getTime())) throw new Error('invalid lease time');
     return this.db.prepare('SELECT run_id, task_id, attempt, worker_id, heartbeat_at, expires_at FROM task_leases WHERE expires_at < ? ORDER BY expires_at').all(now.toISOString())
       .map((row) => Object.assign({}, row, { attempt: Number(row.attempt) }));
+  }
+
+  markOutboxDelivered(id, deliveredAt = new Date().toISOString()) {
+    const result = this.db.prepare('UPDATE outbox SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL').run(deliveredAt, Number(id));
+    return Number(result.changes) === 1;
   }
 
   pendingOutbox() {
