@@ -60,3 +60,20 @@ test('task lease heartbeat is compare-and-swap protected and expires determinist
     kernel.close();
   } finally { fs.rmSync(temp.root, { recursive: true, force: true }); }
 });
+
+test('multi-event transition commits atomically with consecutive revisions', () => {
+  const temp = temporaryDatabase();
+  try {
+    const kernel = new WorkflowKernel(temp.file);
+    kernel.acceptCommand({ commandId: 'telegram:batch', workflow: 'video_production', runId: 'run_video_batch', payload: {} });
+    const result = kernel.appendEvents('run_video_batch', [
+      { type: 'task_completed', payload: { task_id: 'capture_assets', attempt: 1 } },
+      { type: 'gate_waiting', payload: { gate_id: 'asset_lock', packet_sha256: 'a'.repeat(64) } },
+    ], { expectedRevision: 1 });
+    assert.strictEqual(result.revision, 3);
+    assert.strictEqual(kernel.currentState('run_video_batch').waiting_gate, 'asset_lock');
+    assert.throws(() => kernel.appendEvents('run_video_batch', [{ type: 'not_real', payload: {} }], { expectedRevision: 3 }), /unsupported event type/);
+    assert.strictEqual(kernel.events('run_video_batch').length, 3);
+    kernel.close();
+  } finally { fs.rmSync(temp.root, { recursive: true, force: true }); }
+});
