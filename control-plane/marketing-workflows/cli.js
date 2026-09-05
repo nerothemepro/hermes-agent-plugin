@@ -2,6 +2,7 @@
 
 const { MarketingWorkflowController } = require('./controller');
 const { parseTelegramCommand } = require('./command-parser');
+const { resolveEpisodeSeed } = require('./episode-seeds');
 
 function requireText(value, name) {
   const result = String(value || '').trim();
@@ -23,7 +24,7 @@ function assertWorkflow(controller, runId, workflow) {
 function prepareInput(command, input) {
   if (command.workflow === 'research_and_story') {
     if (input !== undefined) throw new Error('research input is resolved only from the allowlisted episode seed');
-    return { episode_id: command.episode_id };
+    return resolveEpisodeSeed(command.episode_id);
   }
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('approved handoff input is required');
   if (command.workflow === 'video_production' && input.approval?.artifact_sha256 !== command.brief_sha256) {

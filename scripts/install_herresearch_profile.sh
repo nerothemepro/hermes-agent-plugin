@@ -40,6 +40,7 @@ toolsets:
   - messaging
   - memory
   - terminal
+  - file
   - browser
 agent:
   max_turns: 30
@@ -122,6 +123,7 @@ platform_toolsets:
     - cronjob
     - memory
     - terminal
+    - file
     - browser
   telegram:
     - clarify
@@ -130,6 +132,7 @@ platform_toolsets:
     - cronjob
     - memory
     - terminal
+    - file
     - browser
 mcp_servers:
   playwright:
