@@ -67,7 +67,7 @@ class NativeKanbanAdapter {
     return { path: handoffPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), input: this.controller.input(runId) };
   }
 
-  _materializeResearchInstructions(runId, handoff) {
+  _materializeResearchInstructions(runId, handoff, scaffold, attempt) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const instructionPath = path.join(artifactRoot, 'research-instructions.md');
     const input = handoff.input || {};
@@ -75,6 +75,8 @@ class NativeKanbanAdapter {
       '# Workflow A research task',
       '',
       `Episode: ${input.episode_id || 'EP4'} revision: ${input.revision || 'r1'}`,
+      `Episode seed: ${scaffold.seedPath}`,
+      `Starter template: ${scaffold.templatePath}`,
       `Language: ${input.language || 'English'}`,
       `Approved audience: ${input.audience || 'Not supplied'}`,
       `Approved pain point: ${input.pain_point || 'Not supplied'}`,
@@ -96,15 +98,41 @@ class NativeKanbanAdapter {
       '- Do not substitute a different industry, audience, or product scenario.',
       '',
       'Required output:',
+      '- Copy the starter template to production-brief.json and replace only its empty story fields with grounded English content.',
+      '- Keep episode_id, revision, audience, pain_point, cta, and evidence bound to the episode seed.',
       '- Write production-brief.json in this workspace using schema sdtk.marketing-production-brief.v1.',
       '- Include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
-      '- Write one sdtk.video-task-result.v1 candidate to worker-result.json with SHA-256 hashes.',
+      `- Run exactly after production-brief.json is valid: node ${path.join(__dirname, 'research-finalizer-cli.js')} --root ${artifactRoot} --run-id ${runId} --attempt ${attempt} --seed-file episode-seed.json`,
+      '- Do not handwrite worker-result.json; the deterministic finalizer creates it.',
       '',
       `Approved handoff: ${handoff.path}`,
       `Artifact root: ${artifactRoot}`,
     ].join('\n') + '\n';
     fs.writeFileSync(instructionPath, content, { mode: 0o600 });
     return { path: instructionPath, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+  }
+
+  _materializeResearchScaffold(runId, handoff) {
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const seedPath = path.join(artifactRoot, 'episode-seed.json');
+    const templatePath = path.join(artifactRoot, 'production-brief.template.json');
+    const seed = handoff.input || {};
+    fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2) + '\n', { mode: 0o600 });
+    const template = {
+      schema_version: 'sdtk.marketing-production-brief.v1',
+      episode_id: seed.episode_id,
+      revision: seed.revision,
+      audience: seed.audience,
+      pain_point: seed.pain_point,
+      hook: '',
+      narration: '',
+      cta: seed.cta,
+      shot_list: [],
+      claim_ledger: [],
+      evidence: ['episode-seed.json'],
+    };
+    fs.writeFileSync(templatePath, JSON.stringify(template, null, 2) + '\n', { mode: 0o600 });
+    return { seedPath, templatePath };
   }
 
   _materializeStagingSmokeCompletion(runId, taskId, attempt) {
@@ -176,8 +204,11 @@ class NativeKanbanAdapter {
   _create(runId, taskId, attempt) {
     const key = this._key(runId, taskId, attempt);
     const handoff = this._materializeHandoff(runId);
-    const researchInstructions = this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true
-      ? this._materializeResearchInstructions(runId, handoff)
+    const researchScaffold = this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true
+      ? this._materializeResearchScaffold(runId, handoff)
+      : null;
+    const researchInstructions = researchScaffold
+      ? this._materializeResearchInstructions(runId, handoff, researchScaffold, attempt)
       : null;
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',

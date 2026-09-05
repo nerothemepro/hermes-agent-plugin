@@ -41,11 +41,17 @@ test('Workflow A materializes the full allowlisted episode scope in the HerResea
     const prepared = env.controller.prepare({ commandId: 'telegram:workflow-a-scope', workflow: 'research_and_story', runId: 'run_mkt_research001', input: seed });
     env.controller.approveKickoff({ commandId: 'telegram:workflow-a-scope-approve', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
     new NativeKanbanAdapter({ controller: env.controller, client, workflow: 'research_and_story', profileHome: '/opt/data/hermes-profiles/herresearch', board: 'marketing-research-staging', assignee: 'herresearch' }).dispatchReadyTask({ runId: prepared.run_id });
-    const instructions = fs.readFileSync(path.join(env.root, 'artifacts', prepared.run_id, 'research-instructions.md'), 'utf8');
+    const artifactRoot = path.join(env.root, 'artifacts', prepared.run_id);
+    const instructions = fs.readFileSync(path.join(artifactRoot, 'research-instructions.md'), 'utf8');
+    const template = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'production-brief.template.json'), 'utf8'));
     assert.match(instructions, /Solo founders, product managers, and technical leads/);
     assert.match(instructions, /reviewable, traceable implementation plan/);
     assert.match(instructions, /sdtk-spec to SDTK-WIKI Kanban to sdtk-code/);
     assert.match(instructions, /No unmeasured productivity/);
+    assert.match(instructions, /research-finalizer-cli.js/);
+    assert.strictEqual(template.audience, seed.audience);
+    assert.strictEqual(template.pain_point, seed.pain_point);
+    assert.deepStrictEqual(template.evidence, ['episode-seed.json']);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 
