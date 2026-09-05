@@ -36,7 +36,7 @@ class NativeKanbanAdapter {
   }
 
   _env() {
-    return { HERMES_HOME: this.profileHome, HERMES_KANBAN_HOME: this.profileHome, PATH: process.env.PATH || '' };
+    return { HERMES_HOME: this.profileHome, HERMES_KANBAN_HOME: '/opt/data/hermes', PATH: process.env.PATH || '' };
   }
 
   _run(argv) {

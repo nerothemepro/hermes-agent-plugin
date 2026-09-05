@@ -39,7 +39,7 @@ class WorkerResultBridge {
     if (this.profileHome !== '/opt/data/hermes-profiles/hervid') throw new Error('worker result bridge requires the hervid profile home');
   }
 
-  _env() { return { HERMES_HOME: this.profileHome, HERMES_KANBAN_HOME: this.profileHome, PATH: process.env.PATH || '' }; }
+  _env() { return { HERMES_HOME: this.profileHome, HERMES_KANBAN_HOME: '/opt/data/hermes', PATH: process.env.PATH || '' }; }
 
   _show(nativeTaskId) {
     const result = this.client.run([this.hermesBin, 'kanban', '--board', this.board, 'show', nativeTaskId, '--json'], { env: this._env() });
