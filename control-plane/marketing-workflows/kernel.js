@@ -194,6 +194,10 @@ class WorkflowKernel {
     return JSON.parse(row.payload_json);
   }
 
+  runIds() {
+    return this.db.prepare('SELECT DISTINCT run_id FROM run_events ORDER BY run_id').all().map((row) => row.run_id);
+  }
+
   events(runIdValue) {
     const runId = requireText(runIdValue, 'run id');
     return this.db.prepare('SELECT run_id, sequence, event_type, payload_json, created_at FROM run_events WHERE run_id = ? ORDER BY sequence').all(runId)

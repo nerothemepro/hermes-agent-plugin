@@ -4,6 +4,7 @@ const childProcess = require('child_process');
 const path = require('path');
 const { MarketingWorkflowController } = require('./controller');
 const { NativeKanbanAdapter } = require('./native-kanban-adapter');
+const { ResearchProductionReconciler } = require('./production-reconciler');
 
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const PRODUCTION_WORKFLOWS = Object.freeze({
@@ -18,15 +19,17 @@ function required(value, name) {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (command !== 'dispatch') throw new Error('exact production command required: dispatch');
+  if (!['dispatch', 'reconcile', 'reconcile-all'].includes(command)) throw new Error('exact production command required: dispatch, reconcile, or reconcile-all');
   const values = {};
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i];
     if (!['--database-file', '--artifact-root', '--run-id'].includes(flag) || !rest[i + 1] || rest[i + 1].startsWith('--')) throw new Error('unknown or incomplete argument: ' + flag);
     values[flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = rest[++i];
   }
-  for (const key of ['databaseFile', 'artifactRoot', 'runId']) if (!values[key]) throw new Error(key + ' is required');
-  return { command, ...values };
+  for (const key of ['databaseFile', 'artifactRoot']) if (!values[key]) throw new Error(key + ' is required');
+  if (command !== 'reconcile-all' && !values.runId) throw new Error('runId is required');
+  if (command === 'reconcile-all' && values.runId) throw new Error('reconcile-all does not accept run id');
+  return { command, databaseFile: values.databaseFile, artifactRoot: values.artifactRoot, runId: values.runId || '' };
 }
 
 function nativeClient(spawnSync = childProcess.spawnSync) {
@@ -38,10 +41,23 @@ function nativeClient(spawnSync = childProcess.spawnSync) {
   };
 }
 
+function reconcileOne(controller, client, runId) {
+  const state = controller.status(runId);
+  const profile = PRODUCTION_WORKFLOWS[state.workflow];
+  if (!profile) return { run_id: runId, status: 'ignored_workflow', state };
+  const result = new ResearchProductionReconciler({ controller, client, hermesBin: HERMES_BIN, ...profile }).reconcile(runId);
+  return { run_id: runId, ...result };
+}
+
 function execute(args, dependencies = {}) {
   const controller = dependencies.controller || new MarketingWorkflowController({ databaseFile: required(args.databaseFile, 'database file'), artifactRoot: required(args.artifactRoot, 'artifact root') });
   const client = dependencies.client || nativeClient(dependencies.spawnSync);
   try {
+    if (args.command === 'reconcile') return { status: 'reconciled', result: reconcileOne(controller, client, args.runId) };
+    if (args.command === 'reconcile-all') {
+      const results = controller.runIds().map((runId) => reconcileOne(controller, client, runId));
+      return { status: 'reconciled_all', results };
+    }
     const state = controller.status(args.runId);
     const profile = PRODUCTION_WORKFLOWS[state.workflow];
     if (!profile) throw new Error('production dispatch is not enabled for this workflow');
@@ -59,7 +75,7 @@ function main(argv = process.argv.slice(2)) {
   return result;
 }
 
-module.exports = { PRODUCTION_WORKFLOWS, execute, main, nativeClient, parseArgs };
+module.exports = { PRODUCTION_WORKFLOWS, execute, main, nativeClient, parseArgs, reconcileOne };
 if (require.main === module) {
   try { main(); } catch (error) { process.stderr.write(JSON.stringify({ status: 'error', error: error.message }) + '\n'); process.exitCode = 1; }
 }

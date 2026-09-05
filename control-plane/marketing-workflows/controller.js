@@ -77,6 +77,8 @@ class MarketingWorkflowController {
 
   status(runId) { return this.kernel.currentState(runId); }
 
+  runIds() { return this.kernel.runIds(); }
+
   input(runId) { return structuredClone(this.kernel.initialPayload(runId)); }
 
   nextTask(runId) {
