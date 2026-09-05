@@ -67,6 +67,33 @@ class NativeKanbanAdapter {
     return { path: handoffPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), input: this.controller.input(runId) };
   }
 
+  _materializeResearchInstructions(runId, handoff) {
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const instructionPath = path.join(artifactRoot, 'research-instructions.md');
+    const input = handoff.input || {};
+    const content = [
+      '# Workflow A research task',
+      '',
+      `Episode: ${input.episode_id || 'EP4'}`,
+      'Produce a bounded English marketing production brief for the approved episode.',
+      '',
+      'Research actions:',
+      '- Investigate the approved pain point using public, attributable sources and the local accepted lessons available to this run.',
+      '- Record source URLs, factual observations, unknowns, and claims that must not be used.',
+      '- Do not invent product metrics, customer results, testimonials, or production claims.',
+      '',
+      'Required output:',
+      '- Write production-brief.json in this workspace using schema sdtk.marketing-production-brief.v1.',
+      '- Include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
+      '- Write one sdtk.video-task-result.v1 candidate to worker-result.json with SHA-256 hashes.',
+      '',
+      `Approved handoff: ${handoff.path}`,
+      `Artifact root: ${artifactRoot}`,
+    ].join('\n') + '\n';
+    fs.writeFileSync(instructionPath, content, { mode: 0o600 });
+    return { path: instructionPath, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+  }
+
   _materializeStagingSmokeCompletion(runId, taskId, attempt) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const scriptPath = path.join(artifactRoot, 'complete-staging-smoke.js');
@@ -91,19 +118,21 @@ class NativeKanbanAdapter {
     return scriptPath;
   }
 
-  _taskBody(runId, taskId, attempt, handoff) {
+  _taskBody(runId, taskId, attempt, handoff, researchInstructions) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const base = [
       `Controller-owned ${this.workflow} staging task.`,
       `Run: ${runId}`,
       `Task: ${taskId} attempt ${attempt}`,
-      `Read only the approved handoff: ${handoff.path}`,
+      `Read the approved handoff: ${handoff.path}`,
       `Approved handoff SHA-256: ${handoff.sha256}`,
       `Write candidate artifacts under: ${artifactRoot}`,
       `Write exactly one result candidate to: ${path.join(artifactRoot, 'worker-result.json')}`,
     ];
     if (this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true) {
       return base.concat([
+        `Read the bounded task instructions: ${researchInstructions.path}`,
+        `Task instructions SHA-256: ${researchInstructions.sha256}`,
         'Use schema sdtk.video-task-result.v1 with hashes for every artifact.',
         'The required artifact is production-brief.json with schema sdtk.marketing-production-brief.v1.',
         'The brief must include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
@@ -134,6 +163,9 @@ class NativeKanbanAdapter {
   _create(runId, taskId, attempt) {
     const key = this._key(runId, taskId, attempt);
     const handoff = this._materializeHandoff(runId);
+    const researchInstructions = this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true
+      ? this._materializeResearchInstructions(runId, handoff)
+      : null;
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',
       `Workflow ${this.workflow} ${runId} ${taskId}`,
@@ -144,7 +176,7 @@ class NativeKanbanAdapter {
       '--max-retries', '1',
       '--created-by', 'marketing-workflow-controller',
       '--initial-status', 'blocked',
-      '--body', this._taskBody(runId, taskId, attempt, handoff),
+      '--body', this._taskBody(runId, taskId, attempt, handoff, researchInstructions),
       '--json',
     ]), 'create');
     const payload = parseJson(result.stdout, 'native create');
