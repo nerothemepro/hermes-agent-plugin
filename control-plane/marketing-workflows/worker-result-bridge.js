@@ -96,7 +96,7 @@ class WorkerResultBridge {
     const native = this._show(nativeTaskId);
     if (!['running', 'ready', 'done'].includes(native.status)) throw new Error('native task is not eligible for result submission');
     if (mapped.status === 'external_released') {
-      this.controller.startTask({ runId, taskId, workerId: `native:hervid:${nativeTaskId}`, attempt: mapped.attempt, ttlMs: 30000 });
+      this.controller.startTask({ runId, taskId, workerId: `native:${this.assignee}:${nativeTaskId}`, attempt: mapped.attempt, ttlMs: 30000 });
     }
     const running = this.controller.status(runId).tasks[taskId];
     if (running.status !== 'running') throw new Error('controller task is not running');

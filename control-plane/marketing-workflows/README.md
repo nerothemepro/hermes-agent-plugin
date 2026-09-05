@@ -16,6 +16,8 @@ Do not connect this module to the production Telegram router until the CLI bound
 
 `bin/hermes-marketing-workflow` is the only command surface intended for a future Telegram router integration. It accepts a bounded `telegram` invocation, persists command idempotency and events in SQLite, and returns JSON only.
 
+Production reconciliation is a separate, non-Telegram command surface: `hermes-marketing-workflow-dispatch reconcile|reconcile-all`. It may only bridge a controller-mapped, hash-validated worker candidate; it never creates a task, retries a worker, or approves a gate. `marketing-workflow-monitor.js` baselines historical outbox events once, reconciles active canonical runs, and delivers new state transitions through the existing owner Telegram channel. Story Lock notifications include the exact SHA-pinned approval grammar.
+
 ```text
 hermes-marketing-workflow telegram \
   --database-file <absolute-state.sqlite> \
