@@ -36,7 +36,9 @@ class WorkerResultBridge {
     this.hermesBin = options.hermesBin || '/workspace/.venvs/hermes-agent/bin/hermes';
     this.profileHome = path.resolve(requireText(options.profileHome, 'profile home'));
     this.board = requireText(options.board, 'board');
-    if (this.profileHome !== '/opt/data/hermes-profiles/hervid') throw new Error('worker result bridge requires the hervid profile home');
+    this.workflow = options.workflow || 'video_production';
+    this.assignee = options.assignee || require('./workflows').resolveWorkflow(this.workflow).owner;
+    if (this.assignee !== require('./workflows').resolveWorkflow(this.workflow).owner) throw new Error('worker bridge assignee does not match workflow owner');
   }
 
   _env() { return { HERMES_HOME: this.profileHome, HERMES_KANBAN_HOME: '/opt/data/hermes', PATH: process.env.PATH || '' }; }
@@ -45,7 +47,7 @@ class WorkerResultBridge {
     const result = this.client.run([this.hermesBin, 'kanban', '--board', this.board, 'show', nativeTaskId, '--json'], { env: this._env() });
     if (!result || result.returncode !== 0) throw new Error('native task lookup failed');
     const task = parseJson(result.stdout, 'native task lookup').task;
-    if (!task || task.id !== nativeTaskId || task.assignee !== 'hervid') throw new Error('native task identity mismatch');
+    if (!task || task.id !== nativeTaskId || task.assignee !== this.assignee) throw new Error('native task identity mismatch');
     return task;
   }
 
