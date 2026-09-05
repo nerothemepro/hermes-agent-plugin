@@ -99,7 +99,7 @@ class NativeKanbanAdapter {
       this.hermesBin, 'kanban', '--board', this.board, 'dispatch', '--max', '1', '--json',
     ]), 'dispatcher');
     const payload = parseJson(result.stdout, 'native dispatcher');
-    const spawned = Array.isArray(payload.spawned) ? payload.spawned.map((item) => typeof item === 'string' ? item : item?.id) : [];
+    const spawned = Array.isArray(payload.spawned) ? payload.spawned.map((item) => typeof item === 'string' ? item : item?.task_id || item?.id) : [];
     if (!spawned.includes(nativeTaskIdValue)) throw new Error('native dispatcher did not claim the registered task');
   }
 

@@ -32,7 +32,7 @@ test('native Kanban adapter creates one blocked HerVid card with a deterministic
       calls.push({ argv, options });
       if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_video_001', status: 'blocked', assignee: 'hervid' }), stderr: '' };
       if (argv.includes('unblock')) return { returncode: 0, stdout: 'Unblocked t_video_001\n', stderr: '' };
-      if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: ['t_video_001'] }), stderr: '' };
+      if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: [{ task_id: 't_video_001', assignee: 'hervid', workspace: '/tmp/smoke' }] }), stderr: '' };
       throw new Error('unexpected command');
     },
   };
