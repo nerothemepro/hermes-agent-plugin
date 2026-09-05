@@ -42,3 +42,11 @@ The sequence is crash-safe at the external boundary:
 5. accept only a hash-validated candidate result from that mapped native card.
 
 A dispatcher failure after release retains the mapping for recovery and must never create a new card. A candidate result with `status: failed` blocks both the controller run and native card; it cannot open an owner gate.
+
+## Immutable Staging Release
+
+The staging scripts are separate from the production router:
+
+`staging/install-release.sh <release-id>` copies only the controller files into a new immutable release directory and writes a per-file SHA-256 manifest. `staging/verify-release.sh <absolute-release-dir>` validates that manifest. `staging/activate-release.sh <release-id>` verifies before atomically replacing the active-release pointer and preserves the previous pointer in an activation backup.
+
+`staging/run-active.sh` accepts only `dispatch` or `submit`, sets staging mode itself, and resolves the validated active release. It is not a Telegram entrypoint. `staging/test-release-scripts.sh` is a disposable filesystem-only smoke test, including a tamper rejection check.
