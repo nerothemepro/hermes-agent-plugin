@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
-const { resolveWorkflow, validateHandoff, validateSocialInput } = require('./workflows');
+const { resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
 
 const FLOW = Object.freeze({
   research_and_story: [{ task: 'research_story', gate: 'story_lock', final: true }],
@@ -167,6 +167,15 @@ class MarketingWorkflowController {
       if (!/^[A-Z][A-Z0-9_]{2,48}$/.test(errorClass)) throw new Error('invalid worker error class');
       this.kernel.appendEvent(input.runId, 'task_failed', { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256, error_class: errorClass }, { expectedRevision: state.revision });
       return { state: this.kernel.currentState(input.runId), packet_sha256: null, result: finalized };
+    }
+    if (state.workflow === 'research_and_story') {
+      const briefArtifact = finalized.artifacts.find((artifact) => artifact.path === 'production-brief.json');
+      if (!briefArtifact) throw new Error('research result must include production-brief.json');
+      const briefPath = path.join(this.artifactRoot, input.runId, briefArtifact.path);
+      let brief;
+      try { brief = JSON.parse(require('fs').readFileSync(briefPath, 'utf8')); } catch { throw new Error('production brief is not valid JSON'); }
+      validateProductionBrief(brief);
+      if (brief.episode_id !== this.kernel.initialPayload(input.runId).episode_id) throw new Error('production brief episode does not match run');
     }
     const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256 } }];
     let packetSha = null;

@@ -9,6 +9,10 @@ const { WorkerResultBridge } = require('./worker-result-bridge');
 const STAGING_BOARD = 'marketing-video-staging';
 const HERVID_HOME = '/opt/data/hermes-profiles/hervid';
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
+const STAGING_WORKFLOWS = Object.freeze({
+  research_and_story: { board: 'marketing-research-staging', profileHome: '/opt/data/hermes-profiles/herresearch', assignee: 'herresearch' },
+  video_production: { board: STAGING_BOARD, profileHome: HERVID_HOME, assignee: 'hervid' },
+});
 
 function requireText(value, name) {
   const result = String(value || '').trim();
@@ -48,7 +52,10 @@ function execute(args, dependencies = {}) {
   if (process.env.SDTK_MARKETING_WORKFLOW_MODE !== 'staging') throw new Error('staging mode is not enabled');
   const controller = dependencies.controller || new MarketingWorkflowController({ databaseFile: absolute(args.databaseFile, 'database file'), artifactRoot: absolute(args.artifactRoot, 'artifact root') });
   const client = dependencies.client || nativeClient(dependencies.spawnSync);
-  const shared = { controller, client, hermesBin: HERMES_BIN, profileHome: HERVID_HOME, board: STAGING_BOARD };
+  const workflow = controller.status(args.runId).workflow;
+  const profile = STAGING_WORKFLOWS[workflow];
+  if (!profile) throw new Error('workflow has no staging adapter');
+  const shared = { controller, client, hermesBin: HERMES_BIN, workflow, ...profile };
   try {
     if (args.command === 'dispatch') return new NativeKanbanAdapter(shared).dispatchReadyTask({ runId: args.runId });
     if (args.command === 'submit') return new WorkerResultBridge(shared).submit({ runId: args.runId, taskId: args.taskId, nativeTaskId: args.nativeTaskId, candidateFile: args.candidateFile });

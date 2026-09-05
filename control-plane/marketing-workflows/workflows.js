@@ -55,4 +55,15 @@ function validateSocialInput(input) {
   return { brief, video };
 }
 
-module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff, validateSocialInput };
+function validateProductionBrief(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema_version !== 'sdtk.marketing-production-brief.v1') throw new Error('invalid production brief');
+  if (!/^EP[0-9]+$/.test(String(value.episode_id || '')) || !/^r[1-9][0-9]*$/.test(String(value.revision || ''))) throw new Error('invalid production brief identity');
+  for (const field of ['audience', 'pain_point', 'hook', 'narration', 'cta']) {
+    if (typeof value[field] !== 'string' || !value[field].trim()) throw new Error('production brief ' + field + ' is required');
+  }
+  for (const field of ['shot_list', 'claim_ledger', 'evidence']) {
+    if (!Array.isArray(value[field]) || value[field].length === 0) throw new Error('production brief ' + field + ' is required');
+  }
+  return structuredClone(value);
+}
+module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput };

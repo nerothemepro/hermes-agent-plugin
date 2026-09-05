@@ -16,7 +16,7 @@ function setup() {
 function artifactResult(root, runId, taskId, name) {
   const directory = path.join(root, runId);
   fs.mkdirSync(directory, { recursive: true });
-  const bytes = Buffer.from(`${name}\n`);
+  const bytes = name === 'production-brief.json' ? Buffer.from(JSON.stringify({ schema_version: 'sdtk.marketing-production-brief.v1', episode_id: 'EP4', revision: 'r1', audience: 'technical founders', pain_point: 'untracked product work creates delivery risk', hook: 'Make the next feature traceable.', narration: 'Turn a requirement into evidence before you ship.', cta: 'Build with proof at sdtk.dev.', shot_list: [{ id: 's1', visual: 'product evidence' }], claim_ledger: [{ claim: 'The workflow records evidence.', status: 'supported' }], evidence: ['evidence.txt'] }) + String.fromCharCode(10)) : Buffer.from(name + String.fromCharCode(10));
   fs.writeFileSync(path.join(directory, name), bytes);
   return { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: taskId, attempt: 1, status: 'completed', artifacts: [{ path: name, sha256: sha(bytes), media_type: 'application/json' }], validation: { status: 'pass', validator: `${taskId}-r1`, evidence: [] }, summary: `${taskId} complete`, error: null };
 }

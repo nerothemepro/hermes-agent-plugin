@@ -34,7 +34,9 @@ class NativeKanbanAdapter {
     this.profileHome = path.resolve(requireText(options.profileHome, 'profile home'));
     this.board = requireText(options.board, 'board');
     if (!BOARD.test(this.board)) throw new Error('invalid staging board');
-    if (this.profileHome !== '/opt/data/hermes-profiles/hervid') throw new Error('native video adapter requires the hervid profile home');
+    this.workflow = options.workflow || 'video_production';
+    this.assignee = options.assignee || resolveWorkflow(this.workflow).owner;
+    if (this.assignee !== resolveWorkflow(this.workflow).owner) throw new Error('native adapter assignee does not match workflow owner');
   }
 
   _env() {
@@ -92,7 +94,7 @@ class NativeKanbanAdapter {
   _taskBody(runId, taskId, attempt, handoff) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const base = [
-      'Controller-owned Workflow B staging task.',
+      `Controller-owned ${this.workflow} staging task.`,
       `Run: ${runId}`,
       `Task: ${taskId} attempt ${attempt}`,
       `Read only the approved handoff: ${handoff.path}`,
@@ -100,6 +102,17 @@ class NativeKanbanAdapter {
       `Write candidate artifacts under: ${artifactRoot}`,
       `Write exactly one result candidate to: ${path.join(artifactRoot, 'worker-result.json')}`,
     ];
+    if (this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true) {
+      return base.concat([
+        'Use schema sdtk.video-task-result.v1 with hashes for every artifact.',
+        'The required artifact is production-brief.json with schema sdtk.marketing-production-brief.v1.',
+        'The brief must include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
+        'Do not invent product metrics or imply production/customer results without evidence.',
+        'After worker-result.json is written, mark this native card complete with a concise summary.',
+        'Do not publish, message external services, create child tasks, or open a controller gate.',
+        'The controller validates the candidate and exclusively owns workflow state and the Story Lock transition.',
+      ]).join('\n');
+    }
     if (handoff.input.staging_smoke === true) {
       const scriptPath = this._materializeStagingSmokeCompletion(runId, taskId, attempt);
       return base.concat([
@@ -123,8 +136,8 @@ class NativeKanbanAdapter {
     const handoff = this._materializeHandoff(runId);
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',
-      `Workflow B ${runId} ${taskId}`,
-      '--assignee', 'hervid',
+      `Workflow ${this.workflow} ${runId} ${taskId}`,
+      '--assignee', this.assignee,
       '--workspace', `dir:${path.join(this.controller.artifactRoot, runId)}`,
       '--idempotency-key', key,
       '--max-runtime', '2h',
@@ -135,7 +148,7 @@ class NativeKanbanAdapter {
       '--json',
     ]), 'create');
     const payload = parseJson(result.stdout, 'native create');
-    if (payload.assignee !== 'hervid' || payload.status !== 'blocked') throw new Error('native create returned an unexpected task identity');
+    if (payload.assignee !== this.assignee || payload.status !== 'blocked') throw new Error('native create returned an unexpected task identity');
     return { native_task_id: nativeTaskId(payload), idempotency_key: key };
   }
 
@@ -168,7 +181,7 @@ class NativeKanbanAdapter {
     const runId = requireText(input.runId, 'run id');
     const next = this.controller.nextTask(runId);
     const state = next.state;
-    if (state.workflow !== 'video_production' || resolveWorkflow(state.workflow).owner !== 'hervid') throw new Error('native adapter supports only Workflow B');
+    if (state.workflow !== this.workflow) throw new Error('native adapter workflow does not match run');
     const taskId = next.task_id;
     if (!taskId) throw new Error('workflow has no ready task');
     let task = state.tasks[taskId];
