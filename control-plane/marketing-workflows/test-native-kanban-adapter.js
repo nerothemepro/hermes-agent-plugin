@@ -9,6 +9,7 @@ const test = require('node:test');
 const { MarketingWorkflowController } = require('./controller');
 const { NativeKanbanAdapter } = require('./native-kanban-adapter');
 const { finalizeTaskResult } = require('./result-contract');
+const { resolveEpisodeSeed } = require('./episode-seeds');
 
 function setup() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-native-kanban-'));
@@ -25,6 +26,34 @@ function approvedBrief() {
     outputs: [{ path: 'research/production-brief.json', sha256: 'c'.repeat(64), media_type: 'application/json' }],
   };
 }
+
+
+test('Workflow A materializes the full allowlisted episode scope in the HerResearch workspace', () => {
+  const env = setup();
+  const client = { run(argv) {
+    if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_research_001', status: 'blocked', assignee: 'herresearch' }), stderr: '' };
+    if (argv.includes('unblock')) return { returncode: 0, stdout: '', stderr: '' };
+    if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: ['t_research_001'] }), stderr: '' };
+    throw new Error('unexpected command');
+  } };
+  try {
+    const seed = resolveEpisodeSeed('EP4');
+    const prepared = env.controller.prepare({ commandId: 'telegram:workflow-a-scope', workflow: 'research_and_story', runId: 'run_mkt_research001', input: seed });
+    env.controller.approveKickoff({ commandId: 'telegram:workflow-a-scope-approve', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    new NativeKanbanAdapter({ controller: env.controller, client, workflow: 'research_and_story', profileHome: '/opt/data/hermes-profiles/herresearch', board: 'marketing-research-staging', assignee: 'herresearch' }).dispatchReadyTask({ runId: prepared.run_id });
+    const artifactRoot = path.join(env.root, 'artifacts', prepared.run_id);
+    const instructions = fs.readFileSync(path.join(artifactRoot, 'research-instructions.md'), 'utf8');
+    const template = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'production-brief.template.json'), 'utf8'));
+    assert.match(instructions, /Solo founders, product managers, and technical leads/);
+    assert.match(instructions, /reviewable, traceable implementation plan/);
+    assert.match(instructions, /sdtk-spec to SDTK-WIKI Kanban to sdtk-code/);
+    assert.match(instructions, /No unmeasured productivity/);
+    assert.match(instructions, /research-finalizer-cli.js/);
+    assert.strictEqual(template.audience, seed.audience);
+    assert.strictEqual(template.pain_point, seed.pain_point);
+    assert.deepStrictEqual(template.evidence, ['episode-seed.json']);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
 
 test('native Kanban adapter creates one blocked HerVid card with a deterministic idempotency key before release and dispatch', () => {
   const env = setup();

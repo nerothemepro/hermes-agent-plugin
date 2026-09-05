@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const { parseArgs, run } = require('./cli-entrypoint');
+const { MarketingWorkflowController } = require('./controller');
 
 function setup() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-workflow-cli-entry-'));
@@ -22,6 +23,34 @@ test('CLI entrypoint derives a stable run id from one Telegram command id and ne
     assert.strictEqual(repeated.status, 'duplicate');
     assert.strictEqual(repeated.run_id, prepared.run_id);
     assert.throws(() => parseArgs(['telegram', '--database-file', env.databaseFile, '--artifact-root', env.artifactRoot, '--command-id', 'telegram:501', '--text', '/marketing-research prepare EP4', '--unsafe']), /unknown or incomplete argument/);
+  } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('research prepare resolves the immutable EP4 episode seed before owner kickoff', () => {
+  const env = setup();
+  try {
+    const prepared = run(parseArgs(['telegram', '--database-file', env.databaseFile, '--artifact-root', env.artifactRoot, '--command-id', 'telegram:ep4-seed', '--text', '/marketing-research prepare EP4']));
+    const controller = new MarketingWorkflowController({ databaseFile: env.databaseFile, artifactRoot: env.artifactRoot });
+    const seed = controller.input(prepared.run_id);
+    controller.close();
+    assert.deepStrictEqual(seed.episode_id, 'EP4');
+    assert.match(seed.audience, /Solo founders/i);
+    assert.match(seed.pain_point, /reviewable, traceable implementation plan/i);
+    assert.match(seed.product_proof, /sdtk-spec/i);
+    assert.strictEqual(seed.language, 'English');
+    assert.strictEqual(seed.cta, 'https://sdtk.dev/');
+    assert.ok(Array.isArray(seed.source_policy));
+    assert.ok(seed.source_policy.length > 0);
+  } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('research prepare fails closed when an episode has no allowlisted seed', () => {
+  const env = setup();
+  try {
+    const args = parseArgs(['telegram', '--database-file', env.databaseFile, '--artifact-root', env.artifactRoot, '--command-id', 'telegram:unknown-seed', '--text', '/marketing-research prepare EP99']);
+    assert.throws(() => run(args), /episode seed is not allowlisted/);
   } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 

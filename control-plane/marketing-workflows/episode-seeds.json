@@ -1,0 +1,28 @@
+{
+  "schema_version": "sdtk.marketing-episode-seeds.v1",
+  "episodes": [
+    {
+      "episode_id": "EP4",
+      "revision": "r1",
+      "language": "English",
+      "audience": "Solo founders, product managers, and technical leads who need a reviewable way to turn customer requirements into implementation plans.",
+      "pain_point": "A raw customer requirement is difficult to turn into a reviewable, traceable implementation plan.",
+      "product_proof": "Use the real sdtk-spec to SDTK-WIKI Kanban to sdtk-code workflow, showing requirement decomposition and an attended handoff.",
+      "cta": "https://sdtk.dev/",
+      "source_policy": [
+        "Use attributable public sources only for general pain-point context.",
+        "Use local product evidence only for SDTK behavior and commands.",
+        "Record unknowns instead of inferring customer outcomes or performance metrics."
+      ],
+      "forbidden_claims": [
+        "No unmeasured productivity, cost-saving, adoption, or customer-result claims.",
+        "No claim that an unattended agent makes owner decisions."
+      ],
+      "required_brief_outputs": [
+        "English narration and caption script.",
+        "A claim ledger with source-backed and forbidden claims.",
+        "A shot list that names real product behaviors to capture."
+      ]
+    }
+  ]
+}
