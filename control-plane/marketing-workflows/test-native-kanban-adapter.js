@@ -145,6 +145,6 @@ test('staging smoke task gives HerVid one deterministic local completion command
     const candidate = JSON.parse(fs.readFileSync(path.join(root, 'worker-result.json'), 'utf8'));
     const finalized = finalizeTaskResult(candidate, { root, expected: { run_id: runId, task_id: 'capture_assets', attempt: 1 } });
     assert.strictEqual(finalized.validation_status, 'pass');
-    assert.strictEqual(finalized.artifacts[0].path, 'smoke-evidence.txt');
+    assert.strictEqual(finalized.artifacts[0].path, 'capture_assets-smoke-evidence.txt');
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
