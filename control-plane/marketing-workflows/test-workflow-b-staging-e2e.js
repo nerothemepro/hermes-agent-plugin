@@ -71,6 +71,7 @@ test('disposable Workflow B staging E2E reaches asset lock then picture lock wit
     const captureCandidate = runWorker(root, runId, 'capture_assets', client, capture.native_task_id);
     const asset = execute({ command: 'submit', ...common, taskId: 'capture_assets', nativeTaskId: capture.native_task_id, candidateFile: captureCandidate }, { controller, client });
     assert.strictEqual(asset.state.waiting_gate, 'asset_lock');
+    assert.strictEqual(asset.result.artifacts[0].path, 'capture_assets-smoke-evidence.txt');
 
     const assetApproved = execute({ command: 'approve-gate', ...common, gateId: 'asset_lock', packetSha256: asset.packet_sha256, commandId: 'staging:e2e:asset-lock' }, { controller, client });
     assert.strictEqual(assetApproved.state.status, 'running');
@@ -79,6 +80,8 @@ test('disposable Workflow B staging E2E reaches asset lock then picture lock wit
     const assemblyCandidate = runWorker(root, runId, 'assemble_video', client, assembly.native_task_id);
     const picture = execute({ command: 'submit', ...common, taskId: 'assemble_video', nativeTaskId: assembly.native_task_id, candidateFile: assemblyCandidate }, { controller, client });
     assert.strictEqual(picture.state.waiting_gate, 'picture_lock');
+    assert.strictEqual(picture.result.artifacts[0].path, 'assemble_video-smoke-evidence.txt');
+    assert.notStrictEqual(asset.result.artifacts[0].path, picture.result.artifacts[0].path);
 
     const duplicate = execute({ command: 'submit', ...common, taskId: 'assemble_video', nativeTaskId: assembly.native_task_id, candidateFile: assemblyCandidate }, { controller, client });
     assert.strictEqual(duplicate.status, 'duplicate');
