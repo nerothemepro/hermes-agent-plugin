@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { resolveWorkflow } = require('./workflows');
 
@@ -54,22 +56,68 @@ class NativeKanbanAdapter {
     return `sdtk-marketing:${runId}:${taskId}:${attempt}`;
   }
 
-  _taskBody(runId, taskId, attempt) {
+  _materializeHandoff(runId) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
-    return [
+    const handoffPath = path.join(artifactRoot, 'approved-handoff.json');
+    const content = `${JSON.stringify(this.controller.input(runId), null, 2)}\n`;
+    fs.mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(handoffPath, content, { mode: 0o600 });
+    return { path: handoffPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), input: this.controller.input(runId) };
+  }
+
+  _materializeStagingSmokeCompletion(runId, taskId, attempt) {
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const scriptPath = path.join(artifactRoot, 'complete-staging-smoke.js');
+    const source = [
+      "'use strict';",
+      "const crypto = require('crypto');",
+      "const fs = require('fs');",
+      "const path = require('path');",
+      `const root = ${JSON.stringify(artifactRoot)};`,
+      `const runId = ${JSON.stringify(runId)};`,
+      `const taskId = ${JSON.stringify(taskId)};`,
+      `const attempt = ${Number(attempt)};`,
+      "const evidencePath = path.join(root, 'smoke-evidence.txt');",
+      "fs.writeFileSync(evidencePath, 'Workflow B disposable staging smoke evidence.\\n', { mode: 0o600 });",
+      "const sha256 = crypto.createHash('sha256').update(fs.readFileSync(evidencePath)).digest('hex');",
+      "const candidate = { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: taskId, attempt, status: 'completed', artifacts: [{ path: 'smoke-evidence.txt', sha256, media_type: 'text/plain' }], validation: { status: 'pass', validator: 'workflow-b-staging-smoke-v1', evidence: ['smoke-evidence.txt'] }, summary: 'Disposable staging smoke evidence created', error: null };",
+      "fs.writeFileSync(path.join(root, 'worker-result.json'), JSON.stringify(candidate, null, 2) + '\\n', { mode: 0o600 });",
+      "process.stdout.write('WORKFLOW_B_STAGING_SMOKE_CANDIDATE_READY\\n');",
+    ].join('\n');
+    fs.writeFileSync(scriptPath, source, { mode: 0o700 });
+    return scriptPath;
+  }
+
+  _taskBody(runId, taskId, attempt, handoff) {
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const base = [
       'Controller-owned Workflow B staging task.',
       `Run: ${runId}`,
       `Task: ${taskId} attempt ${attempt}`,
-      `Read only the approved handoff and write candidate artifacts under: ${artifactRoot}`,
+      `Read only the approved handoff: ${handoff.path}`,
+      `Approved handoff SHA-256: ${handoff.sha256}`,
+      `Write candidate artifacts under: ${artifactRoot}`,
       `Write exactly one result candidate to: ${path.join(artifactRoot, 'worker-result.json')}`,
+    ];
+    if (handoff.input.staging_smoke === true) {
+      const scriptPath = this._materializeStagingSmokeCompletion(runId, taskId, attempt);
+      return base.concat([
+        'This is a disposable staging smoke. Do not capture, render, browse, or publish.',
+        `Run exactly: node ${scriptPath}`,
+        'After the command succeeds, stop. Do not mark this native card complete/block directly.',
+        'The controller validates the candidate and owns every lifecycle transition.',
+      ]).join('\n');
+    }
+    return base.concat([
       'Use schema sdtk.video-task-result.v1 with hashes for every artifact.',
       'Do not publish, message external services, create child tasks, or mark this native card complete/block directly.',
       'The controller validates the candidate and owns every lifecycle transition.',
-    ].join('\n');
+    ]).join('\n');
   }
 
   _create(runId, taskId, attempt) {
     const key = this._key(runId, taskId, attempt);
+    const handoff = this._materializeHandoff(runId);
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',
       `Workflow B ${runId} ${taskId}`,
@@ -80,7 +128,7 @@ class NativeKanbanAdapter {
       '--max-retries', '1',
       '--created-by', 'marketing-workflow-controller',
       '--initial-status', 'blocked',
-      '--body', this._taskBody(runId, taskId, attempt),
+      '--body', this._taskBody(runId, taskId, attempt, handoff),
       '--json',
     ]), 'create');
     const payload = parseJson(result.stdout, 'native create');
@@ -99,7 +147,7 @@ class NativeKanbanAdapter {
       this.hermesBin, 'kanban', '--board', this.board, 'dispatch', '--max', '1', '--json',
     ]), 'dispatcher');
     const payload = parseJson(result.stdout, 'native dispatcher');
-    const spawned = Array.isArray(payload.spawned) ? payload.spawned.map((item) => typeof item === 'string' ? item : item?.id) : [];
+    const spawned = Array.isArray(payload.spawned) ? payload.spawned.map((item) => typeof item === 'string' ? item : item?.task_id || item?.id) : [];
     if (!spawned.includes(nativeTaskIdValue)) throw new Error('native dispatcher did not claim the registered task');
   }
 
