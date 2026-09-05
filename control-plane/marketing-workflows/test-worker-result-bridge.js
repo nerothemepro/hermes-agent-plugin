@@ -37,8 +37,8 @@ function register(controller, runId) {
 test('worker result bridge accepts only the mapped HerVid native card and creates the SHA-pinned asset lock', () => {
   const env = setup();
   const calls = [];
-  const client = { run(argv) {
-    calls.push(argv);
+  const client = { run(argv, options) {
+    calls.push({ argv, options });
     if (argv.includes('show')) return { returncode: 0, stdout: JSON.stringify({ task: { id: 't_worker_001', assignee: 'hervid', status: 'running' } }), stderr: '' };
     if (argv.includes('complete')) return { returncode: 0, stdout: '{}', stderr: '' };
     throw new Error('unexpected native command');
@@ -54,9 +54,11 @@ test('worker result bridge accepts only the mapped HerVid native card and create
     assert.strictEqual(state.status, 'waiting_for_approval');
     assert.strictEqual(state.waiting_gate, 'asset_lock');
     assert.strictEqual(state.tasks.capture_assets.native_task_id, 't_worker_001');
-    const complete = calls.find((argv) => argv.includes('complete'));
+    const complete = calls.find((call) => call.argv.includes('complete'));
     assert.ok(complete);
-    assert.ok(!complete.includes('--json'));
+    assert.ok(!complete.argv.includes('--json'));
+    assert.strictEqual(calls[0].options.env.HERMES_HOME, '/opt/data/hermes-profiles/hervid');
+    assert.strictEqual(calls[0].options.env.HERMES_KANBAN_HOME, '/opt/data/hermes');
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 

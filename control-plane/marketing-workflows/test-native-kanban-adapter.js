@@ -64,7 +64,7 @@ test('native Kanban adapter creates one blocked HerVid card with a deterministic
     assert.strictEqual(calls[0].argv[calls[0].argv.indexOf('--idempotency-key') + 1], 'sdtk-marketing:run_mkt_video001:capture_assets:1');
     assert.strictEqual(calls[0].argv[calls[0].argv.indexOf('--initial-status') + 1], 'blocked');
     assert.strictEqual(calls[0].options.env.HERMES_HOME, '/opt/data/hermes-profiles/hervid');
-    assert.strictEqual(calls[0].options.env.HERMES_KANBAN_HOME, '/opt/data/hermes-profiles/hervid');
+    assert.strictEqual(calls[0].options.env.HERMES_KANBAN_HOME, '/opt/data/hermes');
     assert.ok(!calls[1].argv.includes('--json'));
     assert.ok(calls[2].argv.includes('--json'));
   } finally {
