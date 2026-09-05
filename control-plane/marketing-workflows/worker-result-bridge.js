@@ -92,7 +92,7 @@ class WorkerResultBridge {
       return { status: 'duplicate', state: initial, result: finalized, native_completion: this._completeNative(nativeTaskId, finalized.summary) };
     }
     const native = this._show(nativeTaskId);
-    if (!['running', 'ready'].includes(native.status)) throw new Error('native task is not eligible for result submission');
+    if (!['running', 'ready', 'done'].includes(native.status)) throw new Error('native task is not eligible for result submission');
     if (mapped.status === 'external_released') {
       this.controller.startTask({ runId, taskId, workerId: `native:hervid:${nativeTaskId}`, attempt: mapped.attempt, ttlMs: 30000 });
     }

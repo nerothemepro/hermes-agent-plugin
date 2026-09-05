@@ -104,14 +104,16 @@ class NativeKanbanAdapter {
       return base.concat([
         'This is a disposable staging smoke. Do not capture, render, browse, or publish.',
         `Run exactly: node ${scriptPath}`,
-        'After the command succeeds, stop. Do not mark this native card complete/block directly.',
-        'The controller validates the candidate and owns every lifecycle transition.',
+        'After the command succeeds, mark this native card complete with a concise summary.',
+        'Do not publish, message external services, or open a controller gate.',
+        'The controller validates the candidate and exclusively owns workflow state and every owner-gate transition.',
       ]).join('\n');
     }
     return base.concat([
       'Use schema sdtk.video-task-result.v1 with hashes for every artifact.',
-      'Do not publish, message external services, create child tasks, or mark this native card complete/block directly.',
-      'The controller validates the candidate and owns every lifecycle transition.',
+      'After worker-result.json is written, mark this native card complete with a concise summary.',
+      'Do not publish, message external services, create child tasks, or open a controller gate.',
+      'The controller validates the candidate and exclusively owns workflow state and every owner-gate transition.',
     ]).join('\n');
   }
 

@@ -41,6 +41,12 @@ The sequence is crash-safe at the external boundary:
 4. dispatch at most one card from the dedicated staging board;
 5. accept only a hash-validated candidate result from that mapped native card.
 
+The HerVid worker writes its candidate and marks the mapped native card `done` as a
+transport acknowledgement. That native completion is not a workflow approval: the
+bridge still validates the candidate before it changes controller state, and only
+the controller can open an owner gate. A native `blocked` card is never accepted as
+a successful result.
+
 A dispatcher failure after release retains the mapping for recovery and must never create a new card. A candidate result with `status: failed` blocks both the controller run and native card; it cannot open an owner gate.
 
 ## Immutable Staging Release
