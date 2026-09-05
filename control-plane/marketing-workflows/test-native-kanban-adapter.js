@@ -139,6 +139,7 @@ test('staging smoke task gives HerVid one deterministic local completion command
     const body = calls[0][calls[0].indexOf('--body') + 1];
     const match = body.match(/^Run exactly: node (.+)$/m);
     assert.ok(match);
+    assert.match(body, /mark this native card complete/);
     childProcess.execFileSync(process.execPath, [match[1]], { stdio: 'pipe' });
     const root = path.join(env.root, 'artifacts', runId);
     const candidate = JSON.parse(fs.readFileSync(path.join(root, 'worker-result.json'), 'utf8'));

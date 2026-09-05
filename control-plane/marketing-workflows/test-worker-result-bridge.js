@@ -39,8 +39,8 @@ test('worker result bridge accepts only the mapped HerVid native card and create
   const calls = [];
   const client = { run(argv, options) {
     calls.push({ argv, options });
-    if (argv.includes('show')) return { returncode: 0, stdout: JSON.stringify({ task: { id: 't_worker_001', assignee: 'hervid', status: 'running' } }), stderr: '' };
-    if (argv.includes('complete')) return { returncode: 0, stdout: '{}', stderr: '' };
+    if (argv.includes('show')) return { returncode: 0, stdout: JSON.stringify({ task: { id: 't_worker_001', assignee: 'hervid', status: 'done' } }), stderr: '' };
+    if (argv.includes('complete')) return { returncode: 1, stdout: '', stderr: 'already done' };
     throw new Error('unexpected native command');
   } };
   try {
@@ -50,6 +50,7 @@ test('worker result bridge accepts only the mapped HerVid native card and create
     const submitted = bridge.submit({ runId, taskId: 'capture_assets', nativeTaskId: 't_worker_001', candidateFile: candidate(env.root, runId) });
     assert.strictEqual(submitted.status, 'completed');
     assert.match(submitted.packet_sha256, /^[a-f0-9]{64}$/);
+    assert.strictEqual(submitted.native_completion, 'already_completed');
     const state = env.controller.status(runId);
     assert.strictEqual(state.status, 'waiting_for_approval');
     assert.strictEqual(state.waiting_gate, 'asset_lock');
