@@ -49,6 +49,9 @@ test('Workflow A materializes the full allowlisted episode scope in the HerResea
     assert.match(instructions, /sdtk-spec to SDTK-WIKI Kanban to sdtk-code/);
     assert.match(instructions, /No unmeasured productivity/);
     assert.match(instructions, /research-finalizer-cli.js/);
+    assert.match(instructions, /not open-ended discovery/);
+    assert.match(instructions, /Evidence invariant: evidence must remain exactly/);
+    assert.match(instructions, /Do not call web, browser, terminal repository search/);
     assert.strictEqual(template.audience, seed.audience);
     assert.strictEqual(template.pain_point, seed.pain_point);
     assert.deepStrictEqual(template.evidence, ['episode-seed.json']);

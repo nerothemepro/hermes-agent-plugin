@@ -55,3 +55,13 @@ test('research finalizer rejects a brief that changes immutable episode scope', 
     assert.throws(() => finalizeResearchBrief({ root: env.root, runId: 'run_mkt_finalizer002', attempt: 1, seed: env.seed }), /pain_point does not match episode seed/);
   } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+test('research finalizer rejects inferred or structured evidence in place of the immutable seed receipt', () => {
+  const env = setup();
+  try {
+    const candidate = brief(env.seed);
+    candidate.evidence = [{ type: 'file', path: path.join(env.root, 'episode-seed.json') }];
+    fs.writeFileSync(path.join(env.root, 'production-brief.json'), JSON.stringify(candidate, null, 2) + '\n');
+    assert.throws(() => finalizeResearchBrief({ root: env.root, runId: 'run_mkt_finalizer003', attempt: 1, seed: env.seed }), /must cite episode-seed.json/);
+  } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
+});
