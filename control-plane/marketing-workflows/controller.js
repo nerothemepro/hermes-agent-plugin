@@ -77,6 +77,8 @@ class MarketingWorkflowController {
 
   status(runId) { return this.kernel.currentState(runId); }
 
+  input(runId) { return structuredClone(this.kernel.initialPayload(runId)); }
+
   nextTask(runId) {
     const state = this.kernel.currentState(runId);
     return { state, task_id: this._expectedTask(state) };

@@ -187,6 +187,13 @@ class WorkflowKernel {
     return row ? { command_id: row.command_id, run_id: row.run_id, workflow: row.workflow, payload: JSON.parse(row.payload_json), accepted_at: row.accepted_at } : null;
   }
 
+  initialPayload(runIdValue) {
+    const runId = requireText(runIdValue, 'run id');
+    const row = this.db.prepare('SELECT payload_json FROM commands WHERE run_id = ? ORDER BY accepted_at ASC, rowid ASC LIMIT 1').get(runId);
+    if (!row) throw new Error('run input is unavailable');
+    return JSON.parse(row.payload_json);
+  }
+
   events(runIdValue) {
     const runId = requireText(runIdValue, 'run id');
     return this.db.prepare('SELECT run_id, sequence, event_type, payload_json, created_at FROM run_events WHERE run_id = ? ORDER BY sequence').all(runId)
