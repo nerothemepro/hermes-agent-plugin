@@ -151,7 +151,17 @@ class NativeKanbanAdapter {
     ]), 'dispatcher');
     const payload = parseJson(result.stdout, 'native dispatcher');
     const spawned = Array.isArray(payload.spawned) ? payload.spawned.map((item) => typeof item === 'string' ? item : item?.task_id || item?.id) : [];
-    if (!spawned.includes(nativeTaskIdValue)) throw new Error('native dispatcher did not claim the registered task');
+    if (spawned.includes(nativeTaskIdValue)) return 'claimed_by_cli';
+
+    // The HerVid gateway also owns an embedded dispatcher. It can claim this
+    // card between the explicit CLI kick and JSON response processing. Trust
+    // only the card's authoritative native state, never an empty response.
+    const lookup = this._assertOk(this._run([
+      this.hermesBin, 'kanban', '--board', this.board, 'show', nativeTaskIdValue, '--json',
+    ]), 'native task lookup');
+    const task = parseJson(lookup.stdout, 'native task lookup').task;
+    if (task?.id === nativeTaskIdValue && task.assignee === 'hervid' && ['running', 'done'].includes(task.status)) return 'claimed_by_gateway';
+    throw new Error('native dispatcher did not claim the registered task');
   }
 
   dispatchReadyTask(input) {

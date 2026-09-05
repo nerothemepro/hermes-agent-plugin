@@ -148,3 +148,44 @@ test('staging smoke task gives HerVid one deterministic local completion command
     assert.strictEqual(finalized.artifacts[0].path, 'capture_assets-smoke-evidence.txt');
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+
+test('native Kanban adapter accepts a card already claimed by the gateway only after direct status confirmation', () => {
+  const env = setup();
+  const calls = [];
+  const client = { run(argv) {
+    calls.push(argv);
+    if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_video_004', status: 'blocked', assignee: 'hervid' }), stderr: '' };
+    if (argv.includes('unblock')) return { returncode: 0, stdout: '', stderr: '' };
+    if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: [] }), stderr: '' };
+    if (argv.includes('show')) return { returncode: 0, stdout: JSON.stringify({ task: { id: 't_video_004', assignee: 'hervid', status: 'done' } }), stderr: '' };
+    throw new Error('unexpected command');
+  } };
+  try {
+    const prepared = env.controller.prepare({ commandId: 'telegram:801', workflow: 'video_production', runId: 'run_mkt_video004', input: approvedBrief() });
+    env.controller.approveKickoff({ commandId: 'telegram:802', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    const adapter = new NativeKanbanAdapter({ controller: env.controller, client, profileHome: '/opt/data/hermes-profiles/hervid', board: 'marketing-video-staging' });
+    const dispatched = adapter.dispatchReadyTask({ runId: prepared.run_id });
+    assert.strictEqual(dispatched.native_task_id, 't_video_004');
+    assert.ok(calls.some((argv) => argv.includes('show')));
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('native Kanban adapter does not treat a ready card as an acknowledged gateway claim', () => {
+  const env = setup();
+  const client = { run(argv) {
+    if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_video_005', status: 'blocked', assignee: 'hervid' }), stderr: '' };
+    if (argv.includes('unblock')) return { returncode: 0, stdout: '', stderr: '' };
+    if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: [] }), stderr: '' };
+    if (argv.includes('show')) return { returncode: 0, stdout: JSON.stringify({ task: { id: 't_video_005', assignee: 'hervid', status: 'ready' } }), stderr: '' };
+    throw new Error('unexpected command');
+  } };
+  try {
+    const prepared = env.controller.prepare({ commandId: 'telegram:811', workflow: 'video_production', runId: 'run_mkt_video005', input: approvedBrief() });
+    env.controller.approveKickoff({ commandId: 'telegram:812', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    const adapter = new NativeKanbanAdapter({ controller: env.controller, client, profileHome: '/opt/data/hermes-profiles/hervid', board: 'marketing-video-staging' });
+    assert.throws(() => adapter.dispatchReadyTask({ runId: prepared.run_id }), /native dispatcher did not claim/);
+    assert.strictEqual(env.controller.status(prepared.run_id).tasks.capture_assets.status, 'external_released');
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
