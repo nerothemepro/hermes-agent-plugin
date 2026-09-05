@@ -22,15 +22,18 @@ function absolute(value, name) {
 }
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!['dispatch', 'submit'].includes(command)) throw new Error('exact staging command required: dispatch | submit');
+  if (!['dispatch', 'submit', 'approve-gate', 'reject-gate', 'cancel', 'status'].includes(command)) throw new Error('exact staging command required');
   const values = {};
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index];
-    if (!['--database-file', '--artifact-root', '--run-id', '--task-id', '--native-task-id', '--candidate-file'].includes(flag) || !rest[index + 1] || rest[index + 1].startsWith('--')) throw new Error(`unknown or incomplete argument: ${flag}`);
+    if (!['--database-file', '--artifact-root', '--run-id', '--task-id', '--native-task-id', '--candidate-file', '--gate-id', '--packet-sha256', '--reason-code', '--command-id'].includes(flag) || !rest[index + 1] || rest[index + 1].startsWith('--')) throw new Error(`unknown or incomplete argument: ${flag}`);
     values[flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = rest[++index];
   }
   for (const name of ['databaseFile', 'artifactRoot', 'runId']) requireText(values[name], name);
   if (command === 'submit') for (const name of ['taskId', 'nativeTaskId', 'candidateFile']) requireText(values[name], name);
+  if (command === 'approve-gate') for (const name of ['gateId', 'packetSha256', 'commandId']) requireText(values[name], name);
+  if (command === 'reject-gate') for (const name of ['gateId', 'reasonCode', 'commandId']) requireText(values[name], name);
+  if (command === 'cancel') requireText(values.commandId, 'command id');
   return { command, ...values };
 }
 function nativeClient(spawnSync = childProcess.spawnSync) {
@@ -48,7 +51,11 @@ function execute(args, dependencies = {}) {
   const shared = { controller, client, hermesBin: HERMES_BIN, profileHome: HERVID_HOME, board: STAGING_BOARD };
   try {
     if (args.command === 'dispatch') return new NativeKanbanAdapter(shared).dispatchReadyTask({ runId: args.runId });
-    return new WorkerResultBridge(shared).submit({ runId: args.runId, taskId: args.taskId, nativeTaskId: args.nativeTaskId, candidateFile: args.candidateFile });
+    if (args.command === 'submit') return new WorkerResultBridge(shared).submit({ runId: args.runId, taskId: args.taskId, nativeTaskId: args.nativeTaskId, candidateFile: args.candidateFile });
+    if (args.command === 'approve-gate') return controller.approveGate({ runId: args.runId, gateId: args.gateId, packetSha256: args.packetSha256, commandId: args.commandId });
+    if (args.command === 'reject-gate') return controller.rejectGate({ runId: args.runId, gateId: args.gateId, reasonCode: args.reasonCode, commandId: args.commandId });
+    if (args.command === 'cancel') return controller.cancel({ runId: args.runId, commandId: args.commandId });
+    return { status: 'ok', state: controller.status(args.runId) };
   } finally {
     if (!dependencies.controller) controller.close();
   }

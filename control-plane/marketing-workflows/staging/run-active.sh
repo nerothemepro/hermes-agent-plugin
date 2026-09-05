@@ -2,7 +2,7 @@
 set -euo pipefail
 
 command="${1:-}"
-case "$command" in dispatch|submit) ;; *) echo "exact staging command required: dispatch | submit" >&2; exit 2 ;; esac
+case "$command" in dispatch|submit|approve-gate|reject-gate|cancel|status) ;; *) echo "exact staging command required" >&2; exit 2 ;; esac
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 staging_root="${SDTK_MARKETING_WORKFLOW_STAGING_ROOT:-/opt/data/hermes/control-plane/marketing-workflows-staging}"
