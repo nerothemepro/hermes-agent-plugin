@@ -99,7 +99,7 @@ class MarketingWorkflowController {
       if (existing.attempt !== attempt || existing.native_task_id !== nativeTaskId || existing.idempotency_key !== idempotencyKey || existing.board !== board) throw new Error('external task mapping conflict');
       return { status: 'duplicate', state };
     }
-    if (state.status !== 'ready' || input.taskId !== expectedTask) throw new Error(`expected task ${expectedTask}`);
+    if (!['ready', 'running'].includes(state.status) || state.waiting_gate || input.taskId !== expectedTask) throw new Error(`expected task ${expectedTask}`);
     this.kernel.appendEvent(input.runId, 'task_external_registered', {
       task_id: input.taskId, attempt, native_task_id: nativeTaskId, idempotency_key: idempotencyKey, board,
     }, { expectedRevision: state.revision });
