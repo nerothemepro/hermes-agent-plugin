@@ -51,6 +51,9 @@ class MarketingWorkflowController {
       return { status: 'duplicate', state: this.kernel.currentState(input.runId) };
     }
     const state = this.kernel.currentState(input.runId);
+    if (this._hasApprovalEvent(input.runId, 'kickoff_approved', input.packetSha256)) {
+      return { status: 'duplicate', state };
+    }
     if (state.status !== 'awaiting_kickoff') throw new Error('run is not waiting for kickoff');
     if (state.kickoff_packet_sha256 !== input.packetSha256) throw new Error('packet sha256 mismatch');
     const accepted = this.kernel.commitCommand({
@@ -214,6 +217,14 @@ class MarketingWorkflowController {
     return { state: this.kernel.currentState(input.runId) };
   }
 
+  _hasApprovalEvent(runId, eventType, packetSha256, gateId = null) {
+    return this.kernel.events(runId).some((event) => (
+      event.type === eventType
+      && event.payload.packet_sha256 === packetSha256
+      && (gateId === null || event.payload.gate_id === gateId)
+    ));
+  }
+
   approveGate(input) {
     if (input.commandId) {
       const existing = this.kernel.command(input.commandId);
@@ -223,6 +234,9 @@ class MarketingWorkflowController {
       }
     }
     const state = this.kernel.currentState(input.runId);
+    if (this._hasApprovalEvent(input.runId, 'gate_approved', input.packetSha256, input.gateId)) {
+      return { status: 'duplicate', state };
+    }
     if (state.status !== 'waiting_for_approval' || state.waiting_gate !== input.gateId) throw new Error('run is not waiting for this gate');
     if (state.packet_sha256 !== input.packetSha256) throw new Error('packet sha256 mismatch');
     const steps = FLOW[state.workflow];

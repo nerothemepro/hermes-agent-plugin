@@ -75,6 +75,9 @@ test('research prepare waits for a SHA-pinned kickoff and treats a duplicate own
     const duplicate = env.controller.approveKickoff({ commandId: 'tg:kickoff:1', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
     assert.strictEqual(duplicate.status, 'duplicate');
     assert.strictEqual(duplicate.state.revision, accepted.state.revision);
+    const semanticDuplicate = env.controller.approveKickoff({ commandId: 'tg:kickoff:2', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    assert.strictEqual(semanticDuplicate.status, 'duplicate');
+    assert.strictEqual(semanticDuplicate.state.revision, accepted.state.revision);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 
@@ -90,6 +93,9 @@ test('owner gate approval is idempotent when Telegram repeats the same command i
     const duplicate = env.controller.approveGate({ commandId: 'tg:story-lock:1', runId: prepared.run_id, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
     assert.strictEqual(duplicate.status, 'duplicate');
     assert.strictEqual(duplicate.state.revision, approved.state.revision);
+    const semanticDuplicate = env.controller.approveGate({ commandId: 'tg:story-lock:2', runId: prepared.run_id, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
+    assert.strictEqual(semanticDuplicate.status, 'duplicate');
+    assert.strictEqual(semanticDuplicate.state.revision, approved.state.revision);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 
