@@ -12,6 +12,7 @@ const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const STAGING_WORKFLOWS = Object.freeze({
   research_and_story: { board: 'marketing-research-staging', profileHome: '/opt/data/hermes-profiles/herresearch', assignee: 'herresearch' },
   video_production: { board: STAGING_BOARD, profileHome: HERVID_HOME, assignee: 'hervid' },
+  social_distribution: { board: 'marketing-social-staging', profileHome: '/opt/data/hermes-profiles/hersocial', assignee: 'hersocial' },
 });
 
 function requireText(value, name) {
