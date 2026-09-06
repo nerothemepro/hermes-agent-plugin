@@ -10,6 +10,7 @@ const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const PRODUCTION_WORKFLOWS = Object.freeze({
   research_and_story: { board: 'default', profileHome: '/opt/data/hermes-profiles/herresearch', assignee: 'herresearch' },
   video_production: { board: 'default', profileHome: '/opt/data/hermes-profiles/hervid', assignee: 'hervid' },
+  social_distribution: { board: 'default', profileHome: '/opt/data/hermes-profiles/hersocial', assignee: 'hersocial' },
 });
 
 function required(value, name) {

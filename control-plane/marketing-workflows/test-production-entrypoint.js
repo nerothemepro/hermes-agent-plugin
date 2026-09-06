@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert');
 const test = require('node:test');
-const { parseArgs } = require('./production-entrypoint');
+const { parseArgs, PRODUCTION_WORKFLOWS } = require('./production-entrypoint');
 
 const common = ['--database-file', '/tmp/state.sqlite', '--artifact-root', '/tmp/artifacts'];
 
@@ -21,4 +21,9 @@ test('production reconciliation accepts only fixed single-run or all-run command
     command: 'reconcile-all', databaseFile: '/tmp/state.sqlite', artifactRoot: '/tmp/artifacts', runId: '',
   });
   assert.throws(() => parseArgs(['reconcile-all', ...common, '--run-id', 'run_mkt_abc123def456']), /does not accept run id/);
+});
+
+
+test('production entrypoint allowlists HerSocial only for prepare-only Workflow C', () => {
+  assert.deepStrictEqual(PRODUCTION_WORKFLOWS.social_distribution, { board: 'default', profileHome: '/opt/data/hermes-profiles/hersocial', assignee: 'hersocial' });
 });

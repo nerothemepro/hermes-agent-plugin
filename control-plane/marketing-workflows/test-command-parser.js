@@ -10,6 +10,7 @@ test('parser accepts only exact three-workflow command grammar', () => {
   assert.deepStrictEqual(parseTelegramCommand(`/marketing-video prepare ${HASH_A}`), { action: 'prepare', workflow: 'video_production', brief_sha256: HASH_A });
   assert.deepStrictEqual(parseTelegramCommand(`/marketing-social prepare ${HASH_A} ${HASH_B}`), { action: 'prepare', workflow: 'social_distribution', brief_sha256: HASH_A, video_sha256: HASH_B });
   assert.deepStrictEqual(parseTelegramCommand('APPROVE STORY LOCK run_alpha_123456 ' + HASH_A), { action: 'approve_gate', workflow: 'research_and_story', run_id: 'run_alpha_123456', gate_id: 'story_lock', packet_sha256: HASH_A });
+  assert.deepStrictEqual(parseTelegramCommand('APPROVE SOCIAL READY run_alpha_123456 ' + HASH_A), { action: 'approve_gate', workflow: 'social_distribution', run_id: 'run_alpha_123456', gate_id: 'social_ready', packet_sha256: HASH_A });
 });
 
 test('parser fails closed on partial, extra, or natural-language commands', () => {

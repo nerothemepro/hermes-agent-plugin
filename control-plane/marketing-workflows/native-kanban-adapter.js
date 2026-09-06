@@ -195,6 +195,33 @@ class NativeKanbanAdapter {
     ]).join('\n') + '\n';
   }
 
+  _materializeSocialInstructions(runId, taskId, attempt, handoff) {
+    if (this.workflow !== 'social_distribution' || taskId !== 'prepare_social') return null;
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const finalizer = path.join(__dirname, 'social-finalizer-cli.js');
+    const content = [
+      '# Workflow C prepare-only social task',
+      '',
+      'Prepare checked English YouTube, Facebook, and X payloads from the supplied approved handoffs. This task has no upload, schedule, publish, external message, or credential use permission.',
+      'Use installed sdtk-marketing social generation and validation commands or equivalent local deterministic helpers. Do not assert performance claims, testimonials, or product outcomes not supported by the approved brief.',
+      '',
+      'Artifact root: ' + artifactRoot,
+      'Approved handoffs: ' + handoff.path,
+      'Approved handoff SHA-256: ' + handoff.sha256,
+      '',
+      'Required output:',
+      '- Write youtube.json, facebook.json, and x.json with schema sdtk.marketing-social-payload.v1.',
+      '- Every payload must declare its exact platform, validation_status=pass, publish_authorized=false, and the bound brief_approval_sha256 and video_approval_sha256 from the supplied handoff.',
+      '- Run exactly after all three checked payload files exist: node ' + finalizer + ' --root ' + artifactRoot + ' --run-id ' + runId + ' --attempt ' + attempt,
+      '- Do not handwrite worker-result.json; the deterministic finalizer writes it.',
+      '- Do not run any publisher, uploader, scheduler, browser login, or external messaging command.',
+      '- Mark the native card complete only after the finalizer succeeds. The controller exclusively owns Social Ready.',
+    ].join('\n') + '\n';
+    const instructionPath = path.join(artifactRoot, 'social-instructions.md');
+    fs.writeFileSync(instructionPath, content, { mode: 0o600 });
+    return { path: instructionPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), content };
+  }
+
   _materializeStagingSmokeCompletion(runId, taskId, attempt) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const scriptPath = path.join(artifactRoot, 'complete-staging-smoke.js');
@@ -219,7 +246,7 @@ class NativeKanbanAdapter {
     return scriptPath;
   }
 
-  _taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions) {
+  _taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions, socialInstructions) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const base = [
       `Controller-owned ${this.workflow} task.`,
@@ -231,6 +258,7 @@ class NativeKanbanAdapter {
       `Write exactly one result candidate to: ${path.join(artifactRoot, 'worker-result.json')}`,
     ];
     if (this.workflow === 'video_production' && handoff.input.staging_smoke !== true) return videoInstructions.content;
+    if (this.workflow === 'social_distribution' && handoff.input.staging_smoke !== true) return socialInstructions.content;
     if (this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true) {
       return base.concat([
         `Read the bounded task instructions: ${researchInstructions.path}`,
@@ -275,6 +303,9 @@ class NativeKanbanAdapter {
     const videoInstructions = this.workflow === 'video_production' && handoff.input.staging_smoke !== true
       ? { content: this._materializeVideoInstructions(runId, taskId, attempt, handoff, captureContext) }
       : null;
+    const socialInstructions = this.workflow === 'social_distribution' && handoff.input.staging_smoke !== true
+      ? this._materializeSocialInstructions(runId, taskId, attempt, handoff)
+      : null;
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',
       `Workflow ${this.workflow} ${runId} ${taskId}`,
@@ -285,7 +316,7 @@ class NativeKanbanAdapter {
       '--max-retries', '1',
       '--created-by', 'marketing-workflow-controller',
       '--initial-status', 'blocked',
-      '--body', this._taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions),
+      '--body', this._taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions, socialInstructions),
       '--json',
     ]), 'create');
     const payload = parseJson(result.stdout, 'native create');

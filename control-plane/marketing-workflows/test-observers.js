@@ -38,3 +38,11 @@ test('Kanban projection is a read-only chain of three independent runs', () => {
   assert.strictEqual(projection[1].next_action, 'Approve picture_lock');
   assert.strictEqual(projection[2].status, 'NOT_STARTED');
 });
+
+
+test('Social Ready notification carries the prepare-only owner approval grammar', () => {
+  const packet = 'b'.repeat(64);
+  const message = formatNotification({ run_id: 'run_mkt_social123456', sequence: 7, event_type: 'gate_waiting', payload: { gate_id: 'social_ready', packet_sha256: packet } }, 'social_distribution');
+  assert.match(message, /Social Distribution waiting for owner approval/);
+  assert.match(message, new RegExp('APPROVE SOCIAL READY run_mkt_social123456 ' + packet));
+});

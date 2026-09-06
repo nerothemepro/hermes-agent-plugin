@@ -225,3 +225,21 @@ test('native Kanban adapter does not treat a ready card as an acknowledged gatew
     assert.strictEqual(env.controller.status(prepared.run_id).tasks.capture_assets.status, 'external_released');
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+
+test('Workflow C creates only a bounded HerSocial preparation card with no publisher command', () => {
+  const env = setup(); const calls = [];
+  const client = { run(argv) { calls.push(argv); if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_social_001', status: 'blocked', assignee: 'hersocial' }), stderr: '' }; if (argv.includes('unblock')) return { returncode: 0, stdout: '', stderr: '' }; if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: ['t_social_001'] }), stderr: '' }; throw new Error('unexpected command'); } };
+  try {
+    const brief = approvedBrief();
+    const video = { schema_version: 'sdtk.marketing-handoff.v1', episode_id: 'EP4', revision: 'r1', workflow: 'video_production', validation_status: 'pass', approval: { gate: 'picture_lock', status: 'approved', artifact_sha256: 'b'.repeat(64) }, inputs: [{ sha256: brief.approval.artifact_sha256 }] };
+    const prepared = env.controller.prepare({ commandId: 'telegram:social:001', workflow: 'social_distribution', runId: 'run_mkt_social001', input: { brief, video } });
+    env.controller.approveKickoff({ commandId: 'telegram:social:002', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
+    new NativeKanbanAdapter({ controller: env.controller, client, workflow: 'social_distribution', profileHome: '/opt/data/hermes-profiles/hersocial', board: 'marketing-social-staging' }).dispatchReadyTask({ runId: prepared.run_id });
+    const body = calls[0][calls[0].indexOf('--body') + 1];
+    assert.match(body, /prepare-only social task/);
+    assert.match(body, /social-finalizer-cli\.js/);
+    assert.match(body, /Do not run any publisher, uploader, scheduler/);
+    assert.ok(!/sdtk-marketing video social publish/.test(body));
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
