@@ -42,7 +42,7 @@ function reduceEvent(state, event) {
     next.status = 'running';
     next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'running', attempt: event.payload.attempt };
   } else if (event.type === 'task_completed') {
-    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'completed', attempt: event.payload.attempt, envelope_sha256: event.payload.envelope_sha256 };
+    next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'completed', attempt: event.payload.attempt, envelope_sha256: event.payload.envelope_sha256, ...(event.payload.capture_manifest_sha256 ? { capture_manifest_sha256: event.payload.capture_manifest_sha256 } : {}), ...(event.payload.video_quality_package_sha256 ? { video_quality_package_sha256: event.payload.video_quality_package_sha256 } : {}), ...(event.payload.video_master_sha256 ? { video_master_sha256: event.payload.video_master_sha256 } : {}) };
   } else if (event.type === 'task_failed') {
     next.status = 'blocked';
     next.tasks[event.payload.task_id] = { ...next.tasks[event.payload.task_id], status: 'failed', attempt: event.payload.attempt, envelope_sha256: event.payload.envelope_sha256, error_class: event.payload.error_class };

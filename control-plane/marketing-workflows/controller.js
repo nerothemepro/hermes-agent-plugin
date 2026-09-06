@@ -5,6 +5,7 @@ const path = require('path');
 const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
 const { resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
+const { validateVideoProductionResult } = require('./video-result-validator');
 
 const FLOW = Object.freeze({
   research_and_story: [{ task: 'research_story', gate: 'story_lock', final: true }],
@@ -182,7 +183,8 @@ class MarketingWorkflowController {
       validateProductionBrief(brief);
       if (brief.episode_id !== this.kernel.initialPayload(input.runId).episode_id) throw new Error('production brief episode does not match run');
     }
-    const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256 } }];
+    const videoEvidence = state.workflow === 'video_production' ? validateVideoProductionResult(finalized, state, { stagingSmoke: this.kernel.initialPayload(input.runId).staging_smoke === true }) : null;
+    const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256, ...(videoEvidence || {}) } }];
     let packetSha = null;
     if (step.gate) {
       packetSha = sha256(canonicalJson({ run_id: input.runId, gate_id: step.gate, artifact_sha256: finalized.envelope_sha256 }));

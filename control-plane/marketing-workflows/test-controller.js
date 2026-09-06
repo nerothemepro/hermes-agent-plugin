@@ -21,6 +21,57 @@ function artifactResult(root, runId, taskId, name) {
   return { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: taskId, attempt: 1, status: 'completed', artifacts: [{ path: name, sha256: sha(bytes), media_type: 'application/json' }], validation: { status: 'pass', validator: `${taskId}-r1`, evidence: [] }, summary: `${taskId} complete`, error: null };
 }
 
+function resultFromFiles(root, runId, taskId, files) {
+  const directory = path.join(root, runId);
+  fs.mkdirSync(directory, { recursive: true });
+  const artifacts = files.map((file) => {
+    const bytes = Buffer.isBuffer(file.bytes) ? file.bytes : Buffer.from(file.bytes);
+    fs.writeFileSync(path.join(directory, file.path), bytes);
+    return { path: file.path, sha256: sha(bytes), media_type: file.media_type };
+  });
+  return { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: taskId, attempt: 1, status: 'completed', artifacts, validation: { status: 'pass', validator: taskId + '-r1', evidence: [] }, summary: taskId + ' complete', error: null };
+}
+
+function captureEvidenceResult(root, runId) {
+  const capture = Buffer.from('real-screen-recording-bytes\n');
+  const receipt = Buffer.from('sdtk usage --json\nexit=0\n');
+  const manifest = {
+    schema_version: 'sdtk.marketing-capture-manifest.v1', run_id: runId, task_id: 'capture_assets',
+    capture_mode: 'real_product_evidence', privacy: { status: 'pass' },
+    truth_boundary: { product_behavior: 'real', generated_visuals: false, fabricated_product_behavior: false },
+    captures: [{ artifact_path: 'capture-screen.mp4', sha256: sha(capture), kind: 'screen_recording', viewport: { width: 1920, height: 1080 } }],
+    command_receipts: [{ artifact_path: 'capture-command.txt', sha256: sha(receipt), exit_code: 0 }],
+  };
+  return resultFromFiles(root, runId, 'capture_assets', [
+    { path: 'capture-screen.mp4', bytes: capture, media_type: 'video/mp4' },
+    { path: 'capture-command.txt', bytes: receipt, media_type: 'text/plain' },
+    { path: 'capture-manifest.json', bytes: JSON.stringify(manifest) + '\n', media_type: 'application/json' },
+  ]);
+}
+
+function videoEvidenceResult(root, runId, captureTask) {
+  const master = Buffer.from('video-master-bytes\n');
+  const review = Buffer.from(JSON.stringify({ frames: ['frame-0001.png'] }) + '\n');
+  const quality = {
+    schema_version: 'sdtk.marketing-video-quality-report.v1', run_id: runId, task_id: 'assemble_video', status: 'pass',
+    gates: { capture_truth: 'pass', visual: 'pass', audio: 'pass', captions: 'pass' },
+    output: { width: 1920, height: 1080, duration_seconds: 75 },
+  };
+  const pkg = {
+    schema_version: 'sdtk.marketing-video-quality-package.v1', run_id: runId, task_id: 'assemble_video',
+    capture_envelope_sha256: captureTask.envelope_sha256, capture_manifest_sha256: captureTask.capture_manifest_sha256,
+    video_sha256: sha(master), quality_report_sha256: sha(Buffer.from(JSON.stringify(quality) + '\n')),
+    review_frames_sha256: sha(review),
+  };
+  return resultFromFiles(root, runId, 'assemble_video', [
+    { path: 'video-master.mp4', bytes: master, media_type: 'video/mp4' },
+    { path: 'quality-report.json', bytes: JSON.stringify(quality) + '\n', media_type: 'application/json' },
+    { path: 'review-frames.json', bytes: review, media_type: 'application/json' },
+    { path: 'video-quality-package.json', bytes: JSON.stringify(pkg) + '\n', media_type: 'application/json' },
+  ]);
+}
+
+
 test('research workflow reaches SHA-pinned story lock then completes after exact approval', () => {
   const env = setup();
   try {
@@ -52,7 +103,7 @@ test('video tasks execute in order across asset and picture-lock gates', () => {
     env.controller.prepare({ commandId: 'tg:video', workflow: 'video_production', runId: 'run_video_200', input: handoff });
     assert.throws(() => env.controller.startTask({ runId: 'run_video_200', taskId: 'assemble_video', workerId: 'hervid:1' }), /expected task capture_assets/);
     env.controller.startTask({ runId: 'run_video_200', taskId: 'capture_assets', workerId: 'hervid:1' });
-    const capture = env.controller.completeTask({ runId: 'run_video_200', candidate: artifactResult(path.join(env.root, 'artifacts'), 'run_video_200', 'capture_assets', 'capture-manifest.json') });
+    const capture = env.controller.completeTask({ runId: 'run_video_200', candidate: captureEvidenceResult(path.join(env.root, 'artifacts'), 'run_video_200') });
     env.controller.approveGate({ runId: 'run_video_200', gateId: 'asset_lock', packetSha256: capture.packet_sha256 });
     env.controller.startTask({ runId: 'run_video_200', taskId: 'assemble_video', workerId: 'hervid:1' });
     assert.strictEqual(env.controller.status('run_video_200').tasks.assemble_video.status, 'running');
@@ -159,5 +210,26 @@ test('failed worker evidence blocks the run and never opens an owner gate', () =
     assert.strictEqual(blocked.state.tasks.capture_assets.status, 'failed');
     assert.strictEqual(blocked.state.tasks.capture_assets.error_class, 'TOOL_DEFECT');
     assert.match(blocked.state.tasks.capture_assets.envelope_sha256, /^[a-f0-9]{64}$/);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('video evidence validator rejects a placeholder capture manifest and only opens gates for bound real evidence', () => {
+  const env = setup();
+  try {
+    const handoff = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) } };
+    const runId = 'run_video_evidence_1';
+    env.controller.prepare({ commandId: 'tg:video:evidence', workflow: 'video_production', runId, input: handoff });
+    env.controller.startTask({ runId, taskId: 'capture_assets', workerId: 'hervid:1' });
+    assert.throws(() => env.controller.completeTask({ runId, candidate: artifactResult(path.join(env.root, 'artifacts'), runId, 'capture_assets', 'capture-manifest.json') }), /capture manifest/);
+    assert.strictEqual(env.controller.status(runId).tasks.capture_assets.status, 'running');
+    const capture = env.controller.completeTask({ runId, candidate: captureEvidenceResult(path.join(env.root, 'artifacts'), runId) });
+    assert.strictEqual(capture.state.waiting_gate, 'asset_lock');
+    assert.match(capture.state.tasks.capture_assets.capture_manifest_sha256, /^[a-f0-9]{64}$/);
+    env.controller.approveGate({ runId, gateId: 'asset_lock', packetSha256: capture.packet_sha256 });
+    env.controller.startTask({ runId, taskId: 'assemble_video', workerId: 'hervid:1' });
+    const picture = env.controller.completeTask({ runId, candidate: videoEvidenceResult(path.join(env.root, 'artifacts'), runId, env.controller.status(runId).tasks.capture_assets) });
+    assert.strictEqual(picture.state.waiting_gate, 'picture_lock');
+    assert.match(picture.state.tasks.assemble_video.video_master_sha256, /^[a-f0-9]{64}$/);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });

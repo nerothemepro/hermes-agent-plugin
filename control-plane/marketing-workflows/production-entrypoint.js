@@ -4,11 +4,12 @@ const childProcess = require('child_process');
 const path = require('path');
 const { MarketingWorkflowController } = require('./controller');
 const { NativeKanbanAdapter } = require('./native-kanban-adapter');
-const { ResearchProductionReconciler } = require('./production-reconciler');
+const { ProductionReconciler } = require('./production-reconciler');
 
 const HERMES_BIN = '/workspace/.venvs/hermes-agent/bin/hermes';
 const PRODUCTION_WORKFLOWS = Object.freeze({
   research_and_story: { board: 'default', profileHome: '/opt/data/hermes-profiles/herresearch', assignee: 'herresearch' },
+  video_production: { board: 'default', profileHome: '/opt/data/hermes-profiles/hervid', assignee: 'hervid' },
 });
 
 function required(value, name) {
@@ -45,7 +46,7 @@ function reconcileOne(controller, client, runId) {
   const state = controller.status(runId);
   const profile = PRODUCTION_WORKFLOWS[state.workflow];
   if (!profile) return { run_id: runId, status: 'ignored_workflow', state };
-  const result = new ResearchProductionReconciler({ controller, client, hermesBin: HERMES_BIN, ...profile }).reconcile(runId);
+  const result = new ProductionReconciler({ controller, client, hermesBin: HERMES_BIN, workflow: state.workflow, ...profile }).reconcile(runId);
   return { run_id: runId, ...result };
 }
 
