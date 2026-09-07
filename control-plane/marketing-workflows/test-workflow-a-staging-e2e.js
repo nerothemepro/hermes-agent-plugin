@@ -23,7 +23,7 @@ function brief() { return { schema_version: 'sdtk.marketing-production-brief.v1'
 test('Workflow A staging E2E routes HerResearch and reaches Story Lock', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-a-staging-e2e-')); const runId = 'run_e2e_research_001'; const databaseFile = path.join(root, 'state.sqlite'); const controller = new MarketingWorkflowController({ databaseFile, artifactRoot: root }); const native = client(); const old = process.env.SDTK_MARKETING_WORKFLOW_MODE; process.env.SDTK_MARKETING_WORKFLOW_MODE = 'staging';
   try {
-    const prepared = controller.prepare({ commandId: 'staging:a:prepare', workflow: 'research_and_story', runId, input: { episode_id: 'EP4' } });
+    const prepared = controller.prepare({ commandId: 'staging:a:prepare', workflow: 'research_and_story', runId, input: { episode_id: 'EP4', revision: 'r1' } });
     controller.approveKickoff({ commandId: 'staging:a:kickoff', runId, packetSha256: prepared.kickoff_packet_sha256 });
     const common = { databaseFile, artifactRoot: root, runId }; const dispatch = execute({ command: 'dispatch', ...common }, { controller, client: native }); assert.strictEqual(dispatch.board, 'marketing-research-staging'); assert.strictEqual(native.tasks.get(dispatch.native_task_id).assignee, 'herresearch');
     const runRoot = path.join(root, runId); const briefBytes = Buffer.from(JSON.stringify(brief(), null, 2) + '\n'); fs.mkdirSync(runRoot, { recursive: true }); fs.writeFileSync(path.join(runRoot, 'production-brief.json'), briefBytes); const hash = crypto.createHash('sha256').update(briefBytes).digest('hex');

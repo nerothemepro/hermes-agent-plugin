@@ -75,7 +75,7 @@ function videoEvidenceResult(root, runId, captureTask) {
 test('research workflow reaches SHA-pinned story lock then completes after exact approval', () => {
   const env = setup();
   try {
-    const prepared = env.controller.prepare({ commandId: 'tg:1', workflow: 'research_and_story', runId: 'run_research_100', input: { episode_id: 'EP4' } });
+    const prepared = env.controller.prepare({ commandId: 'tg:1', workflow: 'research_and_story', runId: 'run_research_100', input: { episode_id: 'EP4', revision: 'r1' } });
     assert.strictEqual(prepared.owner, 'herresearch');
     env.controller.startTask({ runId: prepared.run_id, taskId: 'research_story', workerId: 'herresearch:1' });
     const result = artifactResult(path.join(env.root, 'artifacts'), prepared.run_id, 'research_story', 'production-brief.json');
@@ -85,6 +85,12 @@ test('research workflow reaches SHA-pinned story lock then completes after exact
     assert.throws(() => env.controller.approveGate({ runId: prepared.run_id, gateId: 'story_lock', packetSha256: '0'.repeat(64) }), /packet sha256 mismatch/);
     const completed = env.controller.approveGate({ runId: prepared.run_id, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
     assert.strictEqual(completed.state.status, 'completed');
+    assert.ok(completed.handoff?.wrote);
+    const handoffPath = path.join(env.root, 'artifacts', 'handoffs', waiting.state.tasks.research_story.envelope_sha256 + '.json');
+    const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf8'));
+    assert.strictEqual(handoff.workflow, 'research_and_story');
+    assert.strictEqual(handoff.approval.artifact_sha256, waiting.state.tasks.research_story.envelope_sha256);
+    assert.deepStrictEqual(handoff.inputs, []);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 
@@ -114,7 +120,7 @@ test('video tasks execute in order across asset and picture-lock gates', () => {
 test('research prepare waits for a SHA-pinned kickoff and treats a duplicate owner command as a no-op', () => {
   const env = setup();
   try {
-    const prepared = env.controller.prepare({ commandId: 'tg:prepare:1', workflow: 'research_and_story', runId: 'run_research_200', input: { episode_id: 'EP4' } });
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:1', workflow: 'research_and_story', runId: 'run_research_200', input: { episode_id: 'EP4', revision: 'r1' } });
     assert.strictEqual(prepared.status, 'awaiting_kickoff');
     assert.match(prepared.kickoff_packet_sha256, /^[a-f0-9]{64}$/);
     assert.strictEqual(env.controller.status(prepared.run_id).revision, 2);
@@ -135,7 +141,7 @@ test('research prepare waits for a SHA-pinned kickoff and treats a duplicate own
 test('owner gate approval is idempotent when Telegram repeats the same command id', () => {
   const env = setup();
   try {
-    const prepared = env.controller.prepare({ commandId: 'tg:prepare:gate', workflow: 'research_and_story', runId: 'run_research_201', input: { episode_id: 'EP4' } });
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:gate', workflow: 'research_and_story', runId: 'run_research_201', input: { episode_id: 'EP4', revision: 'r1' } });
     env.controller.approveKickoff({ commandId: 'tg:kickoff:gate', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
     env.controller.startTask({ runId: prepared.run_id, taskId: 'research_story', workerId: 'herresearch:1' });
     const waiting = env.controller.completeTask({ runId: prepared.run_id, candidate: artifactResult(path.join(env.root, 'artifacts'), prepared.run_id, 'research_story', 'production-brief.json') });
@@ -164,7 +170,7 @@ test('social preparation accepts only a video handoff bound to the approved rese
 test('owner gate rejection is durable and idempotent without deleting the submitted artifacts', () => {
   const env = setup();
   try {
-    const prepared = env.controller.prepare({ commandId: 'tg:prepare:reject', workflow: 'research_and_story', runId: 'run_research_202', input: { episode_id: 'EP4' } });
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:reject', workflow: 'research_and_story', runId: 'run_research_202', input: { episode_id: 'EP4', revision: 'r1' } });
     env.controller.approveKickoff({ commandId: 'tg:kickoff:reject', runId: prepared.run_id, packetSha256: prepared.kickoff_packet_sha256 });
     env.controller.startTask({ runId: prepared.run_id, taskId: 'research_story', workerId: 'herresearch:1' });
     const candidate = artifactResult(path.join(env.root, 'artifacts'), prepared.run_id, 'research_story', 'production-brief.json');
@@ -182,7 +188,7 @@ test('owner gate rejection is durable and idempotent without deleting the submit
 test('owner cancellation records one event and a repeated Telegram command is a no-op', () => {
   const env = setup();
   try {
-    const prepared = env.controller.prepare({ commandId: 'tg:prepare:cancel', workflow: 'research_and_story', runId: 'run_research_203', input: { episode_id: 'EP4' } });
+    const prepared = env.controller.prepare({ commandId: 'tg:prepare:cancel', workflow: 'research_and_story', runId: 'run_research_203', input: { episode_id: 'EP4', revision: 'r1' } });
     const cancelled = env.controller.cancel({ commandId: 'tg:cancel:1', runId: prepared.run_id });
     assert.strictEqual(cancelled.status, 'cancelled');
     assert.strictEqual(cancelled.state.status, 'cancelled');
@@ -231,5 +237,26 @@ test('video evidence validator rejects a placeholder capture manifest and only o
     const picture = env.controller.completeTask({ runId, candidate: videoEvidenceResult(path.join(env.root, 'artifacts'), runId, env.controller.status(runId).tasks.capture_assets) });
     assert.strictEqual(picture.state.waiting_gate, 'picture_lock');
     assert.match(picture.state.tasks.assemble_video.video_master_sha256, /^[a-f0-9]{64}$/);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('Picture Lock materializes a video handoff bound to the exact Story Lock artifact', () => {
+  const env = setup();
+  try {
+    const brief = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) } };
+    const runId = 'run_video_handoff_1';
+    const prepared = env.controller.prepare({ commandId: 'handoff:video:prepare', workflow: 'video_production', runId, input: brief });
+    env.controller.approveKickoff({ commandId: 'handoff:video:kickoff', runId, packetSha256: prepared.kickoff_packet_sha256 });
+    env.controller.startTask({ runId, taskId: 'capture_assets', workerId: 'hervid:1' });
+    const capture = env.controller.completeTask({ runId, candidate: captureEvidenceResult(path.join(env.root, 'artifacts'), runId) });
+    env.controller.approveGate({ runId, gateId: 'asset_lock', packetSha256: capture.packet_sha256 });
+    env.controller.startTask({ runId, taskId: 'assemble_video', workerId: 'hervid:1' });
+    const picture = env.controller.completeTask({ runId, candidate: videoEvidenceResult(path.join(env.root, 'artifacts'), runId, env.controller.status(runId).tasks.capture_assets) });
+    const completed = env.controller.approveGate({ runId, gateId: 'picture_lock', packetSha256: picture.packet_sha256 });
+    assert.strictEqual(completed.state.status, 'completed');
+    assert.strictEqual(completed.handoff.handoff.workflow, 'video_production');
+    assert.deepStrictEqual(completed.handoff.handoff.inputs, [{ sha256: brief.approval.artifact_sha256 }]);
+    assert.strictEqual(completed.handoff.handoff.approval.artifact_sha256, picture.state.tasks.assemble_video.envelope_sha256);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });

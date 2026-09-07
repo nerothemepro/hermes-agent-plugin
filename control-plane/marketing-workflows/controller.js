@@ -1,12 +1,14 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
 const { resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
 const { validateVideoProductionResult } = require('./video-result-validator');
 const { validateSocialPreparationResult } = require('./social-result-validator');
+const { materializeApprovedHandoff } = require('./handoff-materializer');
 
 const FLOW = Object.freeze({
   research_and_story: [{ task: 'research_story', gate: 'story_lock', final: true }],
@@ -79,6 +81,32 @@ class MarketingWorkflowController {
   _expectedTask(state) {
     return FLOW[state.workflow].find((step) => state.tasks[step.task]?.status !== 'completed')?.task || null;
   }
+
+  _recordAcceptedResult(runId, finalized) {
+    const root = path.join(this.artifactRoot, runId, 'accepted-results');
+    const file = path.join(root, finalized.task_id + '.attempt-' + finalized.attempt + '.json');
+    const candidate = {
+      schema_version: finalized.schema_version, run_id: finalized.run_id, task_id: finalized.task_id, attempt: finalized.attempt,
+      status: finalized.status, artifacts: finalized.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256, media_type: artifact.media_type })),
+      validation: { status: finalized.validation_status, validator: finalized.validator, evidence: finalized.verification_evidence }, summary: finalized.summary, error: finalized.error,
+    };
+    const content = JSON.stringify(candidate, null, 2) + '\n';
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    if (fs.existsSync(file)) {
+      if (fs.readFileSync(file, 'utf8') !== content) throw new Error('accepted task result conflict');
+      return file;
+    }
+    const temporary = file + '.tmp-' + process.pid;
+    fs.writeFileSync(temporary, content, { mode: 0o600 });
+    fs.renameSync(temporary, file);
+    return file;
+  }
+
+  _materializeApprovedHandoff(runId) {
+    return materializeApprovedHandoff({ runId, state: this.kernel.currentState(runId), input: this.kernel.initialPayload(runId), artifactRoot: this.artifactRoot });
+  }
+
+  materializeHandoff(runId) { return this._materializeApprovedHandoff(runId); }
 
   status(runId) { return this.kernel.currentState(runId); }
 
@@ -186,6 +214,7 @@ class MarketingWorkflowController {
     }
     const videoEvidence = state.workflow === 'video_production' ? validateVideoProductionResult(finalized, state, { stagingSmoke: this.kernel.initialPayload(input.runId).staging_smoke === true }) : null;
     if (state.workflow === 'social_distribution') validateSocialPreparationResult(finalized, state, this.kernel.initialPayload(input.runId));
+    this._recordAcceptedResult(input.runId, finalized);
     const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256, ...(videoEvidence || {}) } }];
     let packetSha = null;
     if (step.gate) {
@@ -239,7 +268,8 @@ class MarketingWorkflowController {
     }
     const state = this.kernel.currentState(input.runId);
     if (this._hasApprovalEvent(input.runId, 'gate_approved', input.packetSha256, input.gateId)) {
-      return { status: 'duplicate', state };
+      const handoff = this._materializeApprovedHandoff(input.runId);
+      return { status: 'duplicate', state, handoff };
     }
     if (state.status !== 'waiting_for_approval' || state.waiting_gate !== input.gateId) throw new Error('run is not waiting for this gate');
     if (state.packet_sha256 !== input.packetSha256) throw new Error('packet sha256 mismatch');
@@ -260,7 +290,9 @@ class MarketingWorkflowController {
     } else {
       this.kernel.appendEvents(input.runId, events, { expectedRevision: state.revision });
     }
-    return { state: this.kernel.currentState(input.runId) };
+    const next = this.kernel.currentState(input.runId);
+    const handoff = step.final ? this._materializeApprovedHandoff(input.runId) : null;
+    return { state: next, handoff };
   }
 }
 
