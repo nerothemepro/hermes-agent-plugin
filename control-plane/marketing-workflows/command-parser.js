@@ -15,7 +15,7 @@ function parseTelegramCommand(value) {
   if ((match = text.match(new RegExp('^APPROVE SOCIAL KICKOFF (' + RUN + ') (' + HASH + ')$')))) return { action: 'kickoff', workflow: 'social_distribution', run_id: match[1], packet_sha256: match[2] };
   const approvals = [
     ['STORY LOCK', 'research_and_story', 'story_lock'], ['ASSET LOCK', 'video_production', 'asset_lock'], ['PICTURE LOCK', 'video_production', 'picture_lock'],
-    ['YOUTUBE POST', 'social_distribution', 'youtube_publish'], ['FACEBOOK POST', 'social_distribution', 'facebook_publish'], ['X POST', 'social_distribution', 'x_publish'],
+    ['SOCIAL READY', 'social_distribution', 'social_ready'],
   ];
   for (const [label, workflow, gateId] of approvals) {
     match = text.match(new RegExp('^APPROVE ' + label + ' (' + RUN + ') (' + HASH + ')$'));

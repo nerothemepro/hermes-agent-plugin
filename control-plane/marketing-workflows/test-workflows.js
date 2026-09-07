@@ -9,6 +9,8 @@ test('three workflows each have one Hermes owner and immutable input/output boun
   assert.strictEqual(resolveWorkflow('research_and_story').owner, 'herresearch');
   assert.strictEqual(resolveWorkflow('video_production').owner, 'hervid');
   assert.strictEqual(resolveWorkflow('social_distribution').owner, 'hersocial');
+  assert.deepStrictEqual(resolveWorkflow('social_distribution').owner_gates, ['social_ready']);
+  assert.strictEqual(resolveWorkflow('social_distribution').output, 'social-payload-package.json');
   for (const workflow of Object.values(WORKFLOW_DEFINITIONS)) {
     assert.ok(workflow.stages.length >= 3);
     assert.ok(workflow.owner_gates.length >= 1);

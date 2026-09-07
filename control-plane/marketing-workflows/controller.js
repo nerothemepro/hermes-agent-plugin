@@ -6,11 +6,12 @@ const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
 const { resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
 const { validateVideoProductionResult } = require('./video-result-validator');
+const { validateSocialPreparationResult } = require('./social-result-validator');
 
 const FLOW = Object.freeze({
   research_and_story: [{ task: 'research_story', gate: 'story_lock', final: true }],
   video_production: [{ task: 'capture_assets', gate: 'asset_lock' }, { task: 'assemble_video', gate: 'picture_lock', final: true }],
-  social_distribution: [{ task: 'prepare_social', gate: 'youtube_publish' }, { task: 'publish_youtube', gate: 'facebook_publish' }, { task: 'publish_facebook', gate: 'x_publish' }, { task: 'publish_x', final: true }],
+  social_distribution: [{ task: 'prepare_social', gate: 'social_ready', final: true }],
 });
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -184,6 +185,7 @@ class MarketingWorkflowController {
       if (brief.episode_id !== this.kernel.initialPayload(input.runId).episode_id) throw new Error('production brief episode does not match run');
     }
     const videoEvidence = state.workflow === 'video_production' ? validateVideoProductionResult(finalized, state, { stagingSmoke: this.kernel.initialPayload(input.runId).staging_smoke === true }) : null;
+    if (state.workflow === 'social_distribution') validateSocialPreparationResult(finalized, state, this.kernel.initialPayload(input.runId));
     const events = [{ type: 'task_completed', payload: { task_id: taskId, attempt: finalized.attempt, envelope_sha256: finalized.envelope_sha256, ...(videoEvidence || {}) } }];
     let packetSha = null;
     if (step.gate) {

@@ -1,7 +1,7 @@
 'use strict';
 
 const LABELS = Object.freeze({ research_and_story: 'Research and Story', video_production: 'Video Production', social_distribution: 'Social Distribution' });
-const APPROVALS = Object.freeze({ story_lock: 'STORY LOCK', asset_lock: 'ASSET LOCK', picture_lock: 'PICTURE LOCK' });
+const APPROVALS = Object.freeze({ story_lock: 'STORY LOCK', asset_lock: 'ASSET LOCK', picture_lock: 'PICTURE LOCK', social_ready: 'SOCIAL READY' });
 
 function formatNotification(event, workflow) {
   const resolvedWorkflow = workflow || event.payload?.workflow;

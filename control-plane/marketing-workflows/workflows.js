@@ -15,8 +15,8 @@ const WORKFLOW_DEFINITIONS = Object.freeze({
   }),
   social_distribution: Object.freeze({
     owner: 'hersocial', workers: Object.freeze(['hersocial']),
-    stages: Object.freeze(['generating_payloads', 'validating_payloads', 'awaiting_platform_approvals', 'publishing_platform', 'verifying_permalink']),
-    owner_gates: Object.freeze(['youtube_publish', 'facebook_publish', 'x_publish']), output: 'publish-receipts.json',
+    stages: Object.freeze(['generating_payloads', 'validating_payloads', 'preparing_owner_review']),
+    owner_gates: Object.freeze(['social_ready']), output: 'social-payload-package.json',
   }),
 });
 
