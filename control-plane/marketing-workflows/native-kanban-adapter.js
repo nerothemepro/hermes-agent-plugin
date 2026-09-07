@@ -139,6 +139,62 @@ class NativeKanbanAdapter {
     return { seedPath, templatePath };
   }
 
+  _materializeVideoContext(runId, taskId) {
+    if (this.workflow !== 'video_production' || taskId !== 'assemble_video') return null;
+    const state = this.controller.status(runId);
+    const capture = state.tasks?.capture_assets;
+    if (!capture?.envelope_sha256 || !capture?.capture_manifest_sha256) throw new Error('accepted capture evidence is unavailable for video assembly');
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const contextPath = path.join(artifactRoot, 'accepted-capture.json');
+    const value = { capture_envelope_sha256: capture.envelope_sha256, capture_manifest_sha256: capture.capture_manifest_sha256 };
+    const content = JSON.stringify(value, null, 2) + '\n';
+    fs.writeFileSync(contextPath, content, { mode: 0o600 });
+    return { path: contextPath, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+  }
+
+  _materializeVideoInstructions(runId, taskId, attempt, handoff, captureContext) {
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const finalizer = path.join(__dirname, 'video-finalizer-cli.js');
+    const base = [
+      '# Workflow B evidence-bound video task',
+      '',
+      'Create only real, reproducible product evidence. Do not generate substitute screens, fake terminal output, or product behavior.',
+      'Use the owner-approved story handoff as the only narrative authority. Never publish, upload, message external services, or approve an owner gate.',
+      '',
+      'Required tool boundary:',
+      '- Use installed sdtk-marketing commands and local real product capture only.',
+      '- Run the established sdtk-marketing quality checks before finalizing an assembly result.',
+      '- Do not claim a capture, audio, caption, or visual gate passed unless the emitted report contains the actual result.',
+      '',
+      'Artifact root: ' + artifactRoot,
+      'Approved handoff: ' + handoff.path,
+      'Approved handoff SHA-256: ' + handoff.sha256,
+    ];
+    if (taskId === 'capture_assets') {
+      return base.concat([
+        '',
+        'Task: capture_assets',
+        '- Create real screen/terminal recordings that demonstrate the approved product proof.',
+        '- Write capture-manifest.json with schema sdtk.marketing-capture-manifest.v1, run_id, task_id, capture_mode=real_product_evidence, privacy.status=pass, and truth_boundary { product_behavior: real, generated_visuals: false, fabricated_product_behavior: false }.',
+        '- Each capture must name an artifact_path, kind (screen_recording, screenshot, or terminal_recording), and real viewport width/height.',
+        '- Record every successful capture command in a text receipt and reference it in command_receipts with exit_code=0.',
+        '- Run exactly after the manifest and referenced files exist: node ' + finalizer + ' --root ' + artifactRoot + ' --run-id ' + runId + ' --task-id capture_assets --attempt ' + attempt,
+        '- Do not handwrite worker-result.json; the deterministic finalizer writes it.',
+      ]).join('\n') + '\n';
+    }
+    return base.concat([
+      '',
+      'Task: assemble_video',
+      'Accepted capture binding: ' + captureContext.path,
+      'Accepted capture binding SHA-256: ' + captureContext.sha256,
+      '- Assemble video-master.mp4 only from the owner-approved story and Asset-Locked real capture evidence.',
+      '- Produce quality-report.json with schema sdtk.marketing-video-quality-report.v1, status=pass, output width/height/duration, and pass values for capture_truth, visual, audio, and captions.',
+      '- Produce review-frames.json naming the extracted review frames used to inspect the render.',
+      '- Run exactly after the video and reports exist: node ' + finalizer + ' --root ' + artifactRoot + ' --run-id ' + runId + ' --task-id assemble_video --attempt ' + attempt,
+      '- Do not handwrite worker-result.json; the deterministic finalizer writes it.',
+    ]).join('\n') + '\n';
+  }
+
   _materializeStagingSmokeCompletion(runId, taskId, attempt) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const scriptPath = path.join(artifactRoot, 'complete-staging-smoke.js');
@@ -163,10 +219,10 @@ class NativeKanbanAdapter {
     return scriptPath;
   }
 
-  _taskBody(runId, taskId, attempt, handoff, researchInstructions) {
+  _taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const base = [
-      `Controller-owned ${this.workflow} staging task.`,
+      `Controller-owned ${this.workflow} task.`,
       `Run: ${runId}`,
       `Task: ${taskId} attempt ${attempt}`,
       `Read the approved handoff: ${handoff.path}`,
@@ -174,6 +230,7 @@ class NativeKanbanAdapter {
       `Write candidate artifacts under: ${artifactRoot}`,
       `Write exactly one result candidate to: ${path.join(artifactRoot, 'worker-result.json')}`,
     ];
+    if (this.workflow === 'video_production' && handoff.input.staging_smoke !== true) return videoInstructions.content;
     if (this.workflow === 'research_and_story' && handoff.input.staging_smoke !== true) {
       return base.concat([
         `Read the bounded task instructions: ${researchInstructions.path}`,
@@ -214,6 +271,10 @@ class NativeKanbanAdapter {
     const researchInstructions = researchScaffold
       ? this._materializeResearchInstructions(runId, handoff, researchScaffold, attempt)
       : null;
+    const captureContext = this._materializeVideoContext(runId, taskId);
+    const videoInstructions = this.workflow === 'video_production' && handoff.input.staging_smoke !== true
+      ? { content: this._materializeVideoInstructions(runId, taskId, attempt, handoff, captureContext) }
+      : null;
     const result = this._assertOk(this._run([
       this.hermesBin, 'kanban', '--board', this.board, 'create',
       `Workflow ${this.workflow} ${runId} ${taskId}`,
@@ -224,7 +285,7 @@ class NativeKanbanAdapter {
       '--max-retries', '1',
       '--created-by', 'marketing-workflow-controller',
       '--initial-status', 'blocked',
-      '--body', this._taskBody(runId, taskId, attempt, handoff, researchInstructions),
+      '--body', this._taskBody(runId, taskId, attempt, handoff, researchInstructions, videoInstructions),
       '--json',
     ]), 'create');
     const payload = parseJson(result.stdout, 'native create');
@@ -253,7 +314,7 @@ class NativeKanbanAdapter {
       this.hermesBin, 'kanban', '--board', this.board, 'show', nativeTaskIdValue, '--json',
     ]), 'native task lookup');
     const task = parseJson(lookup.stdout, 'native task lookup').task;
-    if (task?.id === nativeTaskIdValue && task.assignee === 'hervid' && ['running', 'done'].includes(task.status)) return 'claimed_by_gateway';
+    if (task?.id === nativeTaskIdValue && task.assignee === this.assignee && ['running', 'done'].includes(task.status)) return 'claimed_by_gateway';
     throw new Error('native dispatcher did not claim the registered task');
   }
 

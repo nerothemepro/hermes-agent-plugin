@@ -105,6 +105,10 @@ test('native Kanban adapter creates one blocked HerVid card with a deterministic
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(handoffPath, 'utf8')), approvedBrief());
     const taskBody = calls[0].argv[calls[0].argv.indexOf('--body') + 1];
     assert.ok(taskBody.includes(handoffPath));
+    assert.match(taskBody, /real, reproducible product evidence/);
+    assert.match(taskBody, /capture-manifest\.json/);
+    assert.match(taskBody, /video-finalizer-cli\.js/);
+    assert.match(taskBody, /Do not generate substitute screens/);
   } finally {
     env.controller.close();
     fs.rmSync(env.root, { recursive: true, force: true });

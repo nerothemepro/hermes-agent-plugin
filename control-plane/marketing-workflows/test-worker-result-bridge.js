@@ -20,9 +20,18 @@ function brief() {
 function candidate(root, runId) {
   const dir = path.join(root, 'artifacts', runId);
   fs.mkdirSync(dir, { recursive: true });
-  const artifact = Buffer.from('capture manifest\n');
-  fs.writeFileSync(path.join(dir, 'capture-manifest.json'), artifact);
-  const payload = { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: 'capture_assets', attempt: 1, status: 'completed', artifacts: [{ path: 'capture-manifest.json', sha256: sha(artifact), media_type: 'application/json' }], validation: { status: 'pass', validator: 'capture-r1', evidence: ['capture-manifest.json'] }, summary: 'Capture validated', error: null };
+  const capture = Buffer.from('real screen capture\n');
+  const receipt = Buffer.from('capture command receipt\n');
+  fs.writeFileSync(path.join(dir, 'capture.mp4'), capture);
+  fs.writeFileSync(path.join(dir, 'capture.txt'), receipt);
+  const manifest = Buffer.from(JSON.stringify({
+    schema_version: 'sdtk.marketing-capture-manifest.v1', run_id: runId, task_id: 'capture_assets', capture_mode: 'real_product_evidence',
+    privacy: { status: 'pass' }, truth_boundary: { product_behavior: 'real', generated_visuals: false, fabricated_product_behavior: false },
+    captures: [{ artifact_path: 'capture.mp4', sha256: sha(capture), kind: 'screen_recording', viewport: { width: 1920, height: 1080 } }],
+    command_receipts: [{ artifact_path: 'capture.txt', sha256: sha(receipt), exit_code: 0 }],
+  }) + '\n');
+  fs.writeFileSync(path.join(dir, 'capture-manifest.json'), manifest);
+  const payload = { schema_version: 'sdtk.video-task-result.v1', run_id: runId, task_id: 'capture_assets', attempt: 1, status: 'completed', artifacts: [{ path: 'capture.mp4', sha256: sha(capture), media_type: 'video/mp4' }, { path: 'capture.txt', sha256: sha(receipt), media_type: 'text/plain' }, { path: 'capture-manifest.json', sha256: sha(manifest), media_type: 'application/json' }], validation: { status: 'pass', validator: 'capture-r1', evidence: ['capture-manifest.json'] }, summary: 'Capture validated', error: null };
   const file = path.join(dir, 'candidate.json');
   fs.writeFileSync(file, JSON.stringify(payload));
   return file;
