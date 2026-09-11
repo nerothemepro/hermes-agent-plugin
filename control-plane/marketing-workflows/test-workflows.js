@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 const test = require('node:test');
-const { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff, validateCapturePlan } = require('./workflows');
+const { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff, validateCapturePlan, validateAssemblyPlan } = require('./workflows');
 const { resolveEpisodeSeed } = require('./episode-seeds');
 
 test('three workflows each have one Hermes owner and immutable input/output boundaries', () => {
@@ -48,4 +48,19 @@ test('EP4 seed pins the controller-owned demo capture runner', () => {
   assert.strictEqual(seed.capture_plan.runner_id, 'ep4_spec_workflow_demo');
   assert.strictEqual(seed.capture_plan.data_classification, 'demo_only');
   assert.strictEqual(seed.capture_plan.artifacts.capture, 'captures/ep4-spec-workflow-demo.mp4');
+});
+
+test('EP4 seed pins a controller-owned assembly plan that binds only its approved capture', () => {
+  const plan = {
+    schema_version: 'sdtk.marketing-assembly-plan.v1', episode_id: 'EP4', revision: 'r1',
+    data_classification: 'demo_only', runner_id: 'ep4_spec_workflow_demo_assembly',
+    inputs: { capture_manifest: 'capture-manifest.json', capture: 'captures/ep4-spec-workflow-demo.mp4' },
+    artifacts: { video: 'video-master.mp4', quality_report: 'quality-report.json', review_frames: 'review-frames.json' },
+    output: { width: 1920, height: 1080, min_duration_seconds: 60, max_duration_seconds: 120 },
+  };
+  assert.deepStrictEqual(validateAssemblyPlan(plan), plan);
+  assert.throws(() => validateAssemblyPlan({ ...plan, runner_id: 'shell-anything' }), /unsupported assembly runner/);
+  assert.throws(() => validateAssemblyPlan({ ...plan, inputs: { ...plan.inputs, capture: '/tmp/out.mp4' } }), /relative/);
+  const seed = resolveEpisodeSeed('EP4');
+  assert.deepStrictEqual(seed.assembly_plan, plan);
 });

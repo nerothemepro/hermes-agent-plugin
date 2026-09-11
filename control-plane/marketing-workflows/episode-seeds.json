@@ -37,6 +37,28 @@
           "width": 1440,
           "height": 900
         }
+      },
+      "assembly_plan": {
+        "schema_version": "sdtk.marketing-assembly-plan.v1",
+        "episode_id": "EP4",
+        "revision": "r1",
+        "data_classification": "demo_only",
+        "runner_id": "ep4_spec_workflow_demo_assembly",
+        "inputs": {
+          "capture_manifest": "capture-manifest.json",
+          "capture": "captures/ep4-spec-workflow-demo.mp4"
+        },
+        "artifacts": {
+          "video": "video-master.mp4",
+          "quality_report": "quality-report.json",
+          "review_frames": "review-frames.json"
+        },
+        "output": {
+          "width": 1920,
+          "height": 1080,
+          "min_duration_seconds": 60,
+          "max_duration_seconds": 120
+        }
       }
     }
   ]

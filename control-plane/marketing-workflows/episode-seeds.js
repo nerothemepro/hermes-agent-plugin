@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { validateCapturePlan } = require('./workflows');
+const { validateCapturePlan, validateAssemblyPlan } = require('./workflows');
 
 const SEED_FILE = path.join(__dirname, 'episode-seeds.json');
 
@@ -29,7 +29,9 @@ function loadEpisodeSeeds() {
       }
     }
     const capturePlan = validateCapturePlan(candidate.capture_plan);
+    const assemblyPlan = validateAssemblyPlan(candidate.assembly_plan);
     if (capturePlan.episode_id !== episodeId || capturePlan.revision !== candidate.revision) throw new Error('episode seed capture plan identity mismatch');
+    if (assemblyPlan.episode_id !== episodeId || assemblyPlan.revision !== candidate.revision) throw new Error('episode seed assembly plan identity mismatch');
     seeds.set(episodeId, structuredClone(candidate));
   }
   return seeds;

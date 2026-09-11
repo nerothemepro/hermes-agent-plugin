@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { resolveWorkflow, validateCapturePlan } = require('./workflows');
+const { resolveWorkflow, validateCapturePlan, validateAssemblyPlan } = require('./workflows');
 
 const BOARD = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const NATIVE_TASK = /^t_[a-z0-9_]+$/;
@@ -75,6 +75,7 @@ class NativeKanbanAdapter {
     const expected = [
       { source: 'production-brief.json', target: 'approved-production-brief.json' },
       { source: 'capture-plan.json', target: 'approved-capture-plan.json' },
+      { source: 'assembly-plan.json', target: 'approved-assembly-plan.json' },
     ];
     const copied = {};
     for (const item of expected) {
@@ -94,6 +95,11 @@ class NativeKanbanAdapter {
     validateCapturePlan(plan);
     if (plan.episode_id !== input.episode_id || plan.revision !== input.revision) throw new Error('approved capture plan identity does not match handoff');
     result.capturePlan = { ...copied['capture-plan.json'], plan, runnerPath: path.join(__dirname, 'capture-ep4-spec-workflow-demo.js') };
+    let assemblyPlan;
+    try { assemblyPlan = JSON.parse(fs.readFileSync(copied['assembly-plan.json'].path, 'utf8')); } catch { throw new Error('approved assembly plan is not valid JSON'); }
+    validateAssemblyPlan(assemblyPlan);
+    if (assemblyPlan.episode_id !== input.episode_id || assemblyPlan.revision !== input.revision) throw new Error('approved assembly plan identity does not match handoff');
+    result.assemblyPlan = { ...copied['assembly-plan.json'], plan: assemblyPlan, runnerPath: path.join(__dirname, 'assemble-ep4-spec-workflow-demo.js') };
     result.productionBrief = copied['production-brief.json'];
     return result;
   }
@@ -152,7 +158,7 @@ class NativeKanbanAdapter {
       '- Keep episode_id, revision, audience, pain_point, and cta byte-for-byte equivalent to the supplied seed values.',
       '- Evidence invariant: evidence must remain exactly ["episode-seed.json"]. Do not add absolute paths, objects, inferred files, or new evidence.',
       '- Write production-brief.json in this workspace using schema sdtk.marketing-production-brief.v1.',
-      '- capture-plan.json is controller-owned and immutable. Do not edit, replace, or omit it; the finalizer binds it into Story Lock.',
+      '- capture-plan.json and assembly-plan.json are controller-owned and immutable. Do not edit, replace, or omit them; the finalizer binds both into Story Lock.',
       '- Include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
       `- Run exactly after production-brief.json is valid: node ${path.join(__dirname, 'research-finalizer-cli.js')} --root ${artifactRoot} --run-id ${runId} --attempt ${attempt} --seed-file episode-seed.json`,
       '- Do not handwrite worker-result.json; the deterministic finalizer creates it.',
@@ -169,10 +175,13 @@ class NativeKanbanAdapter {
     const seedPath = path.join(artifactRoot, 'episode-seed.json');
     const templatePath = path.join(artifactRoot, 'production-brief.template.json');
     const capturePlanPath = path.join(artifactRoot, 'capture-plan.json');
+    const assemblyPlanPath = path.join(artifactRoot, 'assembly-plan.json');
     const seed = handoff.input || {};
     fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2) + '\n', { mode: 0o600 });
     if (!seed.capture_plan) throw new Error('episode seed capture plan is unavailable');
     fs.writeFileSync(capturePlanPath, JSON.stringify(seed.capture_plan, null, 2) + '\n', { mode: 0o600 });
+    if (!seed.assembly_plan) throw new Error('episode seed assembly plan is unavailable');
+    fs.writeFileSync(assemblyPlanPath, JSON.stringify(seed.assembly_plan, null, 2) + '\n', { mode: 0o600 });
     const template = {
       schema_version: 'sdtk.marketing-production-brief.v1',
       episode_id: seed.episode_id,
@@ -187,7 +196,7 @@ class NativeKanbanAdapter {
       evidence: ['episode-seed.json'],
     };
     fs.writeFileSync(templatePath, JSON.stringify(template, null, 2) + '\n', { mode: 0o600 });
-    return { seedPath, templatePath, capturePlanPath };
+    return { seedPath, templatePath, capturePlanPath, assemblyPlanPath };
   }
 
   _materializeVideoContext(runId, taskId) {

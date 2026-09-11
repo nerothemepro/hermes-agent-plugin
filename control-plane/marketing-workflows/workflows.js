@@ -76,6 +76,19 @@ function validateCapturePlan(value) {
   return structuredClone(value);
 }
 
+function validateAssemblyPlan(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema_version !== 'sdtk.marketing-assembly-plan.v1') throw new Error('invalid assembly plan');
+  if (value.episode_id !== 'EP4' || value.revision !== 'r1' || value.data_classification !== 'demo_only') throw new Error('invalid assembly plan identity');
+  if (value.runner_id !== 'ep4_spec_workflow_demo_assembly') throw new Error('unsupported assembly runner');
+  const inputs = value.inputs;
+  if (!inputs || !isRelativeArtifactPath(inputs.capture_manifest) || !isRelativeArtifactPath(inputs.capture)) throw new Error('assembly plan input paths must be relative');
+  const artifacts = value.artifacts;
+  if (!artifacts || !isRelativeArtifactPath(artifacts.video) || !isRelativeArtifactPath(artifacts.quality_report) || !isRelativeArtifactPath(artifacts.review_frames)) throw new Error('assembly plan artifact paths must be relative');
+  const output = value.output;
+  if (!output || !Number.isInteger(output.width) || output.width < 1280 || !Number.isInteger(output.height) || output.height < 720 || !Number.isInteger(output.min_duration_seconds) || !Number.isInteger(output.max_duration_seconds) || output.min_duration_seconds < 60 || output.max_duration_seconds > 120 || output.min_duration_seconds > output.max_duration_seconds) throw new Error('invalid assembly plan output');
+  return structuredClone(value);
+}
+
 function validateProductionBrief(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema_version !== 'sdtk.marketing-production-brief.v1') throw new Error('invalid production brief');
   if (!/^EP[0-9]+$/.test(String(value.episode_id || '')) || !/^r[1-9][0-9]*$/.test(String(value.revision || ''))) throw new Error('invalid production brief identity');
@@ -87,4 +100,4 @@ function validateProductionBrief(value) {
   }
   return structuredClone(value);
 }
-module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateCapturePlan, validateProductionBrief, validateHandoff, validateSocialInput };
+module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateCapturePlan, validateAssemblyPlan, validateProductionBrief, validateHandoff, validateSocialInput };

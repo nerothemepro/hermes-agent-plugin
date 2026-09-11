@@ -289,10 +289,11 @@ test('approved Story Lock handoff exposes the exact production brief and capture
     const result = resultFromFiles(path.join(env.root, 'artifacts'), runId, 'research_story', [
       { path: 'production-brief.json', bytes: JSON.stringify(brief) + '\n', media_type: 'application/json' },
       { path: 'capture-plan.json', bytes: JSON.stringify(seed.capture_plan) + '\n', media_type: 'application/json' },
+      { path: 'assembly-plan.json', bytes: JSON.stringify(seed.assembly_plan) + '\n', media_type: 'application/json' },
     ]);
     const waiting = env.controller.completeTask({ runId, candidate: result });
     const approved = env.controller.approveGate({ runId, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
-    assert.deepStrictEqual(approved.handoff.handoff.outputs.map((item) => item.path), ['production-brief.json', 'capture-plan.json']);
+    assert.deepStrictEqual(approved.handoff.handoff.outputs.map((item) => item.path), ['production-brief.json', 'capture-plan.json', 'assembly-plan.json']);
     assert.ok(approved.handoff.handoff.source_run_id === runId);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });

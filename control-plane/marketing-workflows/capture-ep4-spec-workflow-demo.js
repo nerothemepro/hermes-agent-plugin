@@ -78,10 +78,12 @@ function writeFixture(root) {
   const fixture = path.join(root, 'demo-fixture');
   const files = {
     'DEMO_DATA.md': '# DEMO DATA\n\nThis isolated fixture exists only to demonstrate real SDTK product behavior. It is not production project data.\n',
-    'SHARED_PLANNING.md': '# Shared Planning\n\n## Refund approval\n\n- [ ] Review customer requirement\n- [ ] Draft implementation plan\n- [ ] Owner approval\n',
-    'QUALITY_CHECKLIST.md': '# Quality Checklist\n\n- [ ] Requirement mapped to plan\n- [ ] Owner gate recorded\n',
-    'docs/requirements/refund-approval.md': '# Refund approval\n\nA support manager needs a reviewable refund approval flow.\n\n## Acceptance\n\n- Owner reviews the decision before implementation.\n',
-    'docs/plans/refund-approval-plan.md': '# Refund approval plan\n\n1. Record the requirement.\n2. Break work into reviewable tasks.\n3. Hold the owner gate.\n',
+    'SHARED_PLANNING.md': '# SHARED PLANNING - Demo Refund Approval\n\n> DEMO DATA. A local, non-production fixture for an evidence-bound capture.\n\n**Current Feature:** REFUND_APPROVAL\n**Feature Name:** Refund approval workflow\n**Pipeline Status:** IN_PROGRESS\n\n| Phase | Status | Owner | Attempt | Last heartbeat | Artifact | Blocker class | Next action |\n|---|---|---|---:|---|---|---|---|\n| 1. Requirement review | DONE | Owner | 1 | demo | docs/requirements/refund-approval.md | - | - |\n| 2. Implementation plan | IN_PROGRESS | Product lead | 1 | demo | docs/plans/refund-approval-plan.md | - | Review plan |\n| 3. Owner approval | TODO | Owner | 0 | - | QUALITY_CHECKLIST.md | - | Approve or reject |\n',
+    'QUALITY_CHECKLIST.md': '# QUALITY CHECKLIST - Demo Refund Approval\n\n> DEMO DATA. This checklist is not production state.\n\n## PHASE 3: Owner Approval CHECKLIST\n| # | Criteria | Status | Verified By | Notes |\n|---|---|---|---|---|\n| 1 | Requirement maps to acceptance criteria | PASS | Demo fixture | Traceable source |\n| 2 | Implementation plan names owner decision | PASS | Demo fixture | Review required |\n| GATE | Owner approval recorded | TODO | Owner | Deliberately pending |\n',
+    'governance/ai/core/IMPROVEMENT_BACKLOG.md': '# Demo Backlog\n\n> DEMO DATA.\n\n| ID | Title | Priority | Status | Owner | Notes |\n|---|---|---|---|---|---|\n| BK-DEMO-001 | Review refund requirement | P1 | DONE | Owner | Requirement retained. |\n| BK-DEMO-002 | Draft approval plan | P1 | IN_PROGRESS | Product lead | Awaiting review. |\n| BK-DEMO-003 | Record owner decision | P1 | TODO | Owner | Human-in-the-loop gate. |\n',
+    'docs/requirements/refund-approval.md': '# Refund approval\n\nA support manager needs a reviewable refund approval flow.\n\n## Problem\nA raw request does not define approval rules, review ownership, or acceptance criteria.\n\n## Acceptance criteria\n- A request can be reviewed before implementation.\n- The owner decision remains visible.\n- The plan links back to this requirement.\n\n## Non-goals\n- This demo does not process a real refund.\n- This demo does not contact a payment provider.\n',
+    'docs/plans/refund-approval-plan.md': '# Refund approval plan\n\n## Plan\n1. Preserve the requirement.\n2. Define approval rules and acceptance criteria.\n3. Break the work into reviewable tasks.\n4. Hold an explicit owner gate before implementation.\n\n## Handoff\nThe implementation handoff may proceed only after the owner records a decision.\n',
+    'docs/traceability/refund-approval-traceability.md': '# Refund approval traceability\n\n| Requirement | Plan item | Gate |\n|---|---|---|\n| Reviewable request | Approval rules | Owner approval |\n| Visible status | Kanban task | Picture lock |\n',
   };
   for (const [relative, content] of Object.entries(files)) {
     const target = path.join(fixture, relative);
@@ -90,6 +92,7 @@ function writeFixture(root) {
   }
   return fixture;
 }
+
 function runChecked(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: options.cwd, encoding: 'utf8', timeout: options.timeout || 60000, env: options.env || process.env, maxBuffer: 4 * 1024 * 1024 });
   if (result.status !== 0) throw new Error(command + ' failed');
@@ -119,10 +122,24 @@ async function captureViewer(input, plan, fixture) {
     const context = await browser.newContext({ viewport: plan.viewport, recordVideo: { dir: temp, size: plan.viewport } });
     const page = await context.newPage();
     const video = page.video();
+    const hold = (ms) => page.waitForTimeout(ms);
+    const click = async (selector) => { await page.locator(selector).click(); await hold(900); };
     await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'networkidle' });
-    await page.waitForTimeout(1200);
-    await page.mouse.wheel(0, 500);
-    await page.waitForTimeout(900);
+    // Every scene is a native Atlas surface. Holds preserve readable product proof.
+    await hold(4200);
+    await click('#kanban-tab-quality'); await hold(4200);
+    await click('#kanban-tab-backlog'); await hold(4200);
+    await click('[data-panel="docs"]'); await hold(2600);
+    await page.locator('#search').fill('refund'); await hold(1800);
+    const firstDoc = page.locator('#doc-list > *').first();
+    if (await firstDoc.count()) { await firstDoc.click(); await hold(2000); }
+    await page.mouse.wheel(0, 500); await hold(3000);
+    await click('[data-panel="graph"]'); await hold(2200);
+    await click('#graph-settings-toggle'); await hold(900);
+    await click('#graph-node-size-large'); await hold(1800);
+    await click('#graph-fit-visible'); await hold(3000);
+    await click('[data-panel="dash"]'); await hold(2600);
+    await click('#kanban-tab-pipeline'); await hold(4200);
     await context.close();
     await browser.close(); browser = null;
     const raw = await video.path();
@@ -136,6 +153,7 @@ async function captureViewer(input, plan, fixture) {
     fs.rmSync(temp, { recursive: true, force: true });
   }
 }
+
 async function main(argv = process.argv.slice(2)) {
   const input = parseArgs(argv);
   const receipt = preflight(input);
