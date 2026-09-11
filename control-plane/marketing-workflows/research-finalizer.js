@@ -21,6 +21,18 @@ function contained(root, relative) {
 
 function digest(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 
+const UNMEASURED_TEMPORAL_CLAIM = /\b(?:in\s+(?:\d+(?:[.,]\d+)?\s+)?seconds?|(?:within|under|less than)\s+\d+(?:[.,]\d+)?\s*(?:seconds?|minutes?|hours?|days?))\b|\b(?:instant(?:ly)?|immediately)\b/i;
+
+function assertNoUnmeasuredTemporalClaims(brief) {
+  const values = [brief.hook, brief.narration];
+  for (const entry of brief.claim_ledger) {
+    if (entry && typeof entry === 'object' && typeof entry.claim === 'string') values.push(entry.claim);
+  }
+  if (values.some((value) => UNMEASURED_TEMPORAL_CLAIM.test(String(value)))) {
+    throw new Error('unmeasured temporal performance claim is not permitted');
+  }
+}
+
 function assertSeedBound(brief, seed) {
   for (const key of ['episode_id', 'revision', 'audience', 'pain_point', 'cta']) {
     if (brief[key] !== seed[key]) throw new Error(key + ' does not match episode seed');
@@ -63,6 +75,7 @@ function finalizeResearchBrief(input) {
   try { brief = JSON.parse(fs.readFileSync(briefFile, 'utf8')); } catch { throw new Error('production-brief.json is not valid JSON'); }
   validateProductionBrief(brief);
   assertSeedBound(brief, seed);
+  assertNoUnmeasuredTemporalClaims(brief);
   const capturePlanFile = assertCapturePlanBound(root, seed);
   const assemblyPlanFile = assertAssemblyPlanBound(root, seed);
   const artifacts = [{ path: 'production-brief.json', sha256: digest(briefFile), media_type: 'application/json' }];
@@ -75,7 +88,7 @@ function finalizeResearchBrief(input) {
     attempt,
     status: 'completed',
     artifacts,
-    validation: { status: 'pass', validator: 'research-brief-finalizer-r1', evidence: ['episode-seed.json'] },
+    validation: { status: 'pass', validator: 'research-brief-finalizer-r2', evidence: ['episode-seed.json'] },
     summary: seed.episode_id + ' production brief ready for Story Lock',
     error: null,
   };
@@ -83,4 +96,4 @@ function finalizeResearchBrief(input) {
   return candidate;
 }
 
-module.exports = { assertSeedBound, finalizeResearchBrief };
+module.exports = { assertNoUnmeasuredTemporalClaims, assertSeedBound, finalizeResearchBrief };
