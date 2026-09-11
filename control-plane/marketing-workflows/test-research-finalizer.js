@@ -88,3 +88,18 @@ test('research finalizer binds an immutable controller capture plan beside the a
     assert.deepStrictEqual(result.artifacts.map((item) => item.path), ['production-brief.json', 'capture-plan.json', 'assembly-plan.json']);
   } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+
+test('research finalizer rejects unmeasured temporal performance claims before Story Lock', () => {
+  const env = setup();
+  try {
+    const candidate = brief(env.seed);
+    candidate.hook = 'Turn a raw requirement into a reviewable plan in seconds.';
+    candidate.claim_ledger = [{ claim: candidate.hook, status: 'supported', evidence: 'episode-seed.json' }];
+    fs.writeFileSync(path.join(env.root, 'production-brief.json'), JSON.stringify(candidate, null, 2) + '\n');
+    assert.throws(
+      () => finalizeResearchBrief({ root: env.root, runId: 'run_mkt_finalizer005', attempt: 1, seed: env.seed }),
+      /unmeasured temporal performance claim/
+    );
+  } finally { fs.rmSync(env.root, { recursive: true, force: true }); }
+});
