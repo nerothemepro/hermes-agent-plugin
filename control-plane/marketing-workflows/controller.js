@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
-const { resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
+const { resolveWorkflow, validateCapturePlan, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
 const { validateVideoProductionResult } = require('./video-result-validator');
 const { validateSocialPreparationResult } = require('./social-result-validator');
 const { materializeApprovedHandoff } = require('./handoff-materializer');
@@ -210,7 +210,17 @@ class MarketingWorkflowController {
       let brief;
       try { brief = JSON.parse(require('fs').readFileSync(briefPath, 'utf8')); } catch { throw new Error('production brief is not valid JSON'); }
       validateProductionBrief(brief);
-      if (brief.episode_id !== this.kernel.initialPayload(input.runId).episode_id) throw new Error('production brief episode does not match run');
+      const seed = this.kernel.initialPayload(input.runId);
+      if (brief.episode_id !== seed.episode_id) throw new Error('production brief episode does not match run');
+      if (seed.capture_plan) {
+        const planArtifact = finalized.artifacts.find((artifact) => artifact.path === 'capture-plan.json');
+        if (!planArtifact) throw new Error('research result must include capture-plan.json');
+        const planPath = path.join(this.artifactRoot, input.runId, planArtifact.path);
+        let plan;
+        try { plan = JSON.parse(fs.readFileSync(planPath, 'utf8')); } catch { throw new Error('capture plan is not valid JSON'); }
+        validateCapturePlan(plan);
+        if (canonicalJson(plan) !== canonicalJson(seed.capture_plan)) throw new Error('capture plan does not match episode seed');
+      }
     }
     const videoEvidence = state.workflow === 'video_production' ? validateVideoProductionResult(finalized, state, { stagingSmoke: this.kernel.initialPayload(input.runId).staging_smoke === true }) : null;
     if (state.workflow === 'social_distribution') validateSocialPreparationResult(finalized, state, this.kernel.initialPayload(input.runId));

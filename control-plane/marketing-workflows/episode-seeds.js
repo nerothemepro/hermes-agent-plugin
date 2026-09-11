@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { validateCapturePlan } = require('./workflows');
 
 const SEED_FILE = path.join(__dirname, 'episode-seeds.json');
 
@@ -27,6 +28,8 @@ function loadEpisodeSeeds() {
         throw new Error(`episode seed ${key} is required`);
       }
     }
+    const capturePlan = validateCapturePlan(candidate.capture_plan);
+    if (capturePlan.episode_id !== episodeId || capturePlan.revision !== candidate.revision) throw new Error('episode seed capture plan identity mismatch');
     seeds.set(episodeId, structuredClone(candidate));
   }
   return seeds;

@@ -3,7 +3,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { validateProductionBrief } = require('./workflows');
+const { validateCapturePlan, validateProductionBrief } = require('./workflows');
+const { canonicalJson } = require('./result-contract');
 
 function requiredText(value, name) {
   const result = String(value || '').trim();
@@ -27,6 +28,17 @@ function assertSeedBound(brief, seed) {
   if (!brief.evidence.includes('episode-seed.json')) throw new Error('production brief must cite episode-seed.json');
 }
 
+function assertCapturePlanBound(root, seed) {
+  if (!seed.capture_plan) return null;
+  const file = contained(root, 'capture-plan.json');
+  if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) throw new Error('capture-plan.json is unavailable');
+  let plan;
+  try { plan = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new Error('capture-plan.json is not valid JSON'); }
+  validateCapturePlan(plan);
+  if (canonicalJson(plan) !== canonicalJson(seed.capture_plan)) throw new Error('capture plan does not match episode seed');
+  return file;
+}
+
 function finalizeResearchBrief(input) {
   const root = path.resolve(requiredText(input.root, 'root'));
   const runId = requiredText(input.runId, 'run id');
@@ -40,13 +52,16 @@ function finalizeResearchBrief(input) {
   try { brief = JSON.parse(fs.readFileSync(briefFile, 'utf8')); } catch { throw new Error('production-brief.json is not valid JSON'); }
   validateProductionBrief(brief);
   assertSeedBound(brief, seed);
+  const capturePlanFile = assertCapturePlanBound(root, seed);
+  const artifacts = [{ path: 'production-brief.json', sha256: digest(briefFile), media_type: 'application/json' }];
+  if (capturePlanFile) artifacts.push({ path: 'capture-plan.json', sha256: digest(capturePlanFile), media_type: 'application/json' });
   const candidate = {
     schema_version: 'sdtk.video-task-result.v1',
     run_id: runId,
     task_id: 'research_story',
     attempt,
     status: 'completed',
-    artifacts: [{ path: 'production-brief.json', sha256: digest(briefFile), media_type: 'application/json' }],
+    artifacts,
     validation: { status: 'pass', validator: 'research-brief-finalizer-r1', evidence: ['episode-seed.json'] },
     summary: seed.episode_id + ' production brief ready for Story Lock',
     error: null,

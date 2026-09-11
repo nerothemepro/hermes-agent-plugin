@@ -58,3 +58,14 @@ The staging scripts are separate from the production router:
 `staging/install-release.sh <release-id>` copies only the controller files into a new immutable release directory and writes a per-file SHA-256 manifest. `staging/verify-release.sh <absolute-release-dir>` validates that manifest. `staging/activate-release.sh <release-id>` verifies before atomically replacing the active-release pointer and preserves the previous pointer in an activation backup.
 
 `staging/run-active.sh` accepts only `dispatch`, `submit`, `approve-gate`, `reject-gate`, `cancel`, or `status`, sets staging mode itself, and resolves the validated active release. Gate mutations require an exact gate, packet SHA-256, and command ID. These commands are staging-test harnesses only: they are not Telegram grammar and are not connected to the production router. `staging/test-release-scripts.sh` is a disposable filesystem-only smoke test, including a tamper rejection check.
+
+
+## EP4 Controller-Owned Demo Capture
+
+EP4 no longer asks HerVid to invent a product-capture procedure. The owner-approved Story Lock now binds two artifacts: `production-brief.json` and `capture-plan.json`. The latter is an allowlisted `demo_only` plan for `ep4_spec_workflow_demo`.
+
+Before Workflow B creates a native HerVid card, the adapter verifies both source artifact hashes, copies them immutably into the Video Production run, and runs the runner's local preflight. A missing plan, changed hash, unavailable `sdtk-wiki`/`ffmpeg`/Chromium/Playwright runtime, or unsupported runner stops before card creation. It never retries an old failed card.
+
+The runner creates a run-local `DEMO DATA` fixture, builds an SDTK-WIKI Atlas with the real CLI, records the actual local viewer through Chromium, normalizes it with FFmpeg, and invokes the existing video finalizer. It never reads or mutates a production repository.
+
+The Remotion project at `media-pipeline/remotion/sdtk-tutorial` is the pinned Playwright runtime. Before deploying a release that enables this EP4 path, run `npm ci` in that directory. The runner preflight is intentionally fail-closed when that dependency is absent.
