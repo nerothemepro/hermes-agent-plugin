@@ -66,8 +66,25 @@ EP4 no longer asks HerVid to invent a product-capture procedure. The owner-appro
 
 Before Workflow B creates a native HerVid card, the adapter verifies the approved production brief, capture plan, and assembly plan hashes, then copies all three immutably into the Video Production run. A missing plan, changed hash, unavailable `sdtk-wiki`/`ffmpeg`/Chromium/Playwright runtime, or unsupported runner stops before card creation. It never retries an old failed card.
 
-The EP4 capture runner records populated Dashboard, Docs View, and Knowledge Graph surfaces from an isolated `DEMO DATA` fixture. It does not stretch an empty one-screen capture into a finished film. The separate assembly runner remains a later gated slice and must add narrated/captioned composition plus final quality evidence before Picture Lock.
+The EP4 capture runner records populated Dashboard, Docs View, and Knowledge Graph surfaces from an isolated `DEMO DATA` fixture. It does not stretch an empty one-screen capture into a finished film. The assembly runner is also controller-owned: it accepts only the immutable Story Lock plans plus the Asset-Locked capture binding, and never asks HerVid to choose a renderer, narration source, or quality contract.
 
 The runner creates a run-local `DEMO DATA` fixture, builds an SDTK-WIKI Atlas with the real CLI, records the actual local viewer through Chromium, normalizes it with FFmpeg, and invokes the existing video finalizer. It never reads or mutates a production repository.
 
 The Remotion project at `media-pipeline/remotion/sdtk-tutorial` is the pinned Playwright runtime. Before deploying a release that enables this EP4 path, run `npm ci` in that directory. The runner preflight is intentionally fail-closed when that dependency is absent.
+
+
+### EP4 Controller-Owned Assembly
+
+After Asset Lock, the native card contains one exact command for
+`assemble-ep4-spec-workflow-demo.js`. The runner rejects a capture shorter than the
+locked 60-second floor, verifies the capture-manifest SHA and accepted-capture binding,
+and uses only local tools: FFmpeg, the installed HyperFrames Kokoro TTS command, and the
+published `sdtk-marketing-kit` reference probe. It creates English narration, burned-in
+captions, a stable header outside the product surface, four timestamped review frames, and
+a 1920x1080 H.264/AAC output.
+
+The deterministic finalizer hash-binds `video-master.mp4`, `quality-report.json`,
+`review-frames.json`, and `captions.json` into `video-quality-package.json`. The
+validator rejects an assembly whose caption artifact is absent or whose hash does not match.
+The worker can only mark its native card complete after that finalizer exits successfully;
+Picture Lock remains owner-attended.

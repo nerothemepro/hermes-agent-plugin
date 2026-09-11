@@ -256,6 +256,20 @@ class NativeKanbanAdapter {
         '- Do not handwrite worker-result.json; the deterministic finalizer writes it.',
       ]).join('\n') + '\n';
     }
+    if (handoff.assemblyPlan) {
+      return base.concat([
+        '',
+        'Task: assemble_video',
+        'Accepted capture binding: ' + captureContext.path,
+        'Accepted capture binding SHA-256: ' + captureContext.sha256,
+        'Approved assembly plan: ' + handoff.assemblyPlan.path,
+        'Approved assembly plan SHA-256: ' + handoff.assemblyPlan.sha256,
+        '- Do not edit, replace, or omit the approved assembly plan, production brief, capture manifest, or accepted capture binding.',
+        '- Run exactly: node ' + handoff.assemblyPlan.runnerPath + ' --root ' + artifactRoot + ' --run-id ' + runId + ' --attempt ' + attempt,
+        '- The controller-owned runner creates narration, captions, video-master.mp4, review frames, quality evidence, and worker-result.json only after the exact checks pass.',
+        '- Mark the native card complete only after the exact command exits 0.',
+      ]).join('\n') + '\n';
+    }
     return base.concat([
       '',
       'Task: assemble_video',

@@ -307,3 +307,14 @@ test('Workflow B fails before native card creation when a Story Lock handoff lac
     assert.strictEqual(env.controller.status(runId).tasks.capture_assets, undefined);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
+
+
+test('Workflow B assembly card invokes the controller-owned EP4 assembly runner exactly', () => {
+  const env = setup();
+  try {
+    const adapter = new NativeKanbanAdapter({ controller: env.controller, client: { run() { throw new Error('not called'); } }, profileHome: '/opt/data/hermes-profiles/hervid', board: 'marketing-video-staging' });
+    const text = adapter._materializeVideoInstructions('run_mkt_assembly_exact', 'assemble_video', 1, { assemblyPlan: { path: '/tmp/approved-assembly-plan.json', sha256: 'a'.repeat(64), runnerPath: '/tmp/assemble-ep4-spec-workflow-demo.js' } }, { path: '/tmp/accepted-capture.json', sha256: 'b'.repeat(64) });
+    assert.match(text, /Run exactly: node \/tmp\/assemble-ep4-spec-workflow-demo\.js --root /);
+    assert.ok(!/Assemble video-master\.mp4 only from/.test(text));
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});

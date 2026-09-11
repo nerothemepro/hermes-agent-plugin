@@ -53,6 +53,7 @@ function captureEvidenceResult(root, runId) {
 function videoEvidenceResult(root, runId, captureTask) {
   const master = Buffer.from('video-master-bytes\n');
   const review = Buffer.from(JSON.stringify({ frames: ['frame-0001.png'] }) + '\n');
+  const captions = Buffer.from(JSON.stringify({ cues: [{ text: 'caption' }] }) + '\n');
   const quality = {
     schema_version: 'sdtk.marketing-video-quality-report.v1', run_id: runId, task_id: 'assemble_video', status: 'pass',
     gates: { capture_truth: 'pass', visual: 'pass', audio: 'pass', captions: 'pass' },
@@ -62,12 +63,13 @@ function videoEvidenceResult(root, runId, captureTask) {
     schema_version: 'sdtk.marketing-video-quality-package.v1', run_id: runId, task_id: 'assemble_video',
     capture_envelope_sha256: captureTask.envelope_sha256, capture_manifest_sha256: captureTask.capture_manifest_sha256,
     video_sha256: sha(master), quality_report_sha256: sha(Buffer.from(JSON.stringify(quality) + '\n')),
-    review_frames_sha256: sha(review),
+    review_frames_sha256: sha(review), captions_sha256: sha(captions),
   };
   return resultFromFiles(root, runId, 'assemble_video', [
     { path: 'video-master.mp4', bytes: master, media_type: 'video/mp4' },
     { path: 'quality-report.json', bytes: JSON.stringify(quality) + '\n', media_type: 'application/json' },
     { path: 'review-frames.json', bytes: review, media_type: 'application/json' },
+    { path: 'captions.json', bytes: captions, media_type: 'application/json' },
     { path: 'video-quality-package.json', bytes: JSON.stringify(pkg) + '\n', media_type: 'application/json' },
   ]);
 }

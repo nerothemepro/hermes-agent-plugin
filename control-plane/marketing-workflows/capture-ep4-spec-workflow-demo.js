@@ -140,6 +140,15 @@ async function captureViewer(input, plan, fixture) {
     await click('#graph-fit-visible'); await hold(3000);
     await click('[data-panel="dash"]'); await hold(2600);
     await click('#kanban-tab-pipeline'); await hold(4200);
+    // Continue through distinct, real viewer states so the final assembly never pads or loops a short capture.
+    await click('[data-panel="docs"]'); await hold(2600);
+    await page.locator('#search').fill('plan'); await hold(1800);
+    const planDoc = page.locator('#doc-list > *').first();
+    if (await planDoc.count()) { await planDoc.click(); await hold(3000); }
+    await page.mouse.wheel(0, 500); await hold(3200);
+    await click('[data-panel="dash"]'); await hold(2600);
+    await click('#kanban-tab-quality'); await hold(3200);
+    await click('#kanban-tab-backlog'); await hold(3200);
     await context.close();
     await browser.close(); browser = null;
     const raw = await video.path();

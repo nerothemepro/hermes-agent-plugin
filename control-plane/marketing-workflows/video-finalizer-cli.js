@@ -48,14 +48,15 @@ function finalizeVideo(input) {
   const video = artifact(input.root, 'video-master.mp4', 'video/mp4');
   const quality = artifact(input.root, 'quality-report.json', 'application/json');
   const review = artifact(input.root, 'review-frames.json', 'application/json');
+  const captions = artifact(input.root, 'captions.json', 'application/json');
   const pkg = {
     schema_version: 'sdtk.marketing-video-quality-package.v1', run_id: input.runId, task_id: input.taskId,
     capture_envelope_sha256: capture.capture_envelope_sha256,
     capture_manifest_sha256: capture.capture_manifest_sha256,
-    video_sha256: video.sha256, quality_report_sha256: quality.sha256, review_frames_sha256: review.sha256,
+    video_sha256: video.sha256, quality_report_sha256: quality.sha256, review_frames_sha256: review.sha256, captions_sha256: captions.sha256,
   };
   fs.writeFileSync(path.join(input.root, 'video-quality-package.json'), JSON.stringify(pkg, null, 2) + '\n', { mode: 0o600 });
-  return [video, quality, review, artifact(input.root, 'video-quality-package.json', 'application/json')];
+  return [video, quality, review, captions, artifact(input.root, 'video-quality-package.json', 'application/json')];
 }
 function main(argv = process.argv.slice(2)) {
   const input = parseArgs(argv);
