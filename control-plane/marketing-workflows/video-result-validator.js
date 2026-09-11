@@ -81,6 +81,8 @@ function validateVideoQualityPackage(finalized, state) {
   const { artifact: qualityArtifact, value: quality } = parseJsonArtifact(finalized, 'quality-report.json', 'quality report');
   const review = index.get('review-frames.json');
   if (!review || review.sha256 !== requireSha(pkg.review_frames_sha256, 'video quality package review frames sha256')) throw new Error('review frames are not bound to the quality package');
+  const captions = index.get('captions.json');
+  if (!captions || captions.sha256 !== requireSha(pkg.captions_sha256, 'video quality package captions sha256')) throw new Error('captions are not bound to the quality package');
   if (quality.schema_version !== 'sdtk.marketing-video-quality-report.v1' || quality.run_id !== state.run_id || quality.task_id !== 'assemble_video' || quality.status !== 'pass') {
     throw new Error('quality report does not pass');
   }
