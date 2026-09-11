@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const childProcess = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -44,6 +45,7 @@ test('Workflow A materializes the full allowlisted episode scope in the HerResea
     const artifactRoot = path.join(env.root, 'artifacts', prepared.run_id);
     const instructions = fs.readFileSync(path.join(artifactRoot, 'research-instructions.md'), 'utf8');
     const template = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'production-brief.template.json'), 'utf8'));
+    const capturePlan = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'capture-plan.json'), 'utf8'));
     assert.match(instructions, /Solo founders, product managers, and technical leads/);
     assert.match(instructions, /reviewable, traceable implementation plan/);
     assert.match(instructions, /sdtk-spec to SDTK-WIKI Kanban to sdtk-code/);
@@ -55,6 +57,9 @@ test('Workflow A materializes the full allowlisted episode scope in the HerResea
     assert.strictEqual(template.audience, seed.audience);
     assert.strictEqual(template.pain_point, seed.pain_point);
     assert.deepStrictEqual(template.evidence, ['episode-seed.json']);
+    assert.strictEqual(capturePlan.runner_id, 'ep4_spec_workflow_demo');
+    assert.deepStrictEqual(capturePlan, seed.capture_plan);
+    assert.match(instructions, /capture-plan\.json is controller-owned and immutable/);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });
 
@@ -241,5 +246,57 @@ test('Workflow C creates only a bounded HerSocial preparation card with no publi
     assert.match(body, /social-finalizer-cli\.js/);
     assert.match(body, /Do not run any publisher, uploader, scheduler/);
     assert.ok(!/sdtk-marketing video social publish/.test(body));
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('Workflow B copies the approved source files and runs capture preflight before creating HerVid work', () => {
+  const env = setup();
+  const calls = [];
+  const sourceRunId = 'run_mkt_source001';
+  const sourceRoot = path.join(env.root, 'artifacts', sourceRunId);
+  const briefBytes = Buffer.from(JSON.stringify({ schema_version: 'sdtk.marketing-production-brief.v1', episode_id: 'EP4', revision: 'r1', audience: 'founders', pain_point: 'unclear work', hook: 'Trace it.', narration: 'Make it visible.', cta: 'https://sdtk.dev/', shot_list: [{ id: 's1' }], claim_ledger: [{ claim: 'proof' }], evidence: ['episode-seed.json'] }) + '\n');
+  const plan = { schema_version: 'sdtk.marketing-capture-plan.v1', episode_id: 'EP4', revision: 'r1', data_classification: 'demo_only', runner_id: 'ep4_spec_workflow_demo', artifacts: { capture: 'captures/ep4-spec-workflow-demo.mp4', receipt: 'receipts/ep4-spec-workflow-demo.txt' }, viewport: { width: 1440, height: 900 } };
+  const planBytes = Buffer.from(JSON.stringify(plan) + '\n');
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'production-brief.json'), briefBytes);
+  fs.writeFileSync(path.join(sourceRoot, 'capture-plan.json'), planBytes);
+  const handoff = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', source_run_id: sourceRunId, approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) }, outputs: [
+    { path: 'production-brief.json', sha256: crypto.createHash('sha256').update(briefBytes).digest('hex'), media_type: 'application/json' },
+    { path: 'capture-plan.json', sha256: crypto.createHash('sha256').update(planBytes).digest('hex'), media_type: 'application/json' },
+  ] };
+  const client = { run(argv) { calls.push(argv); if (argv.includes('create')) return { returncode: 0, stdout: JSON.stringify({ id: 't_video_006', status: 'blocked', assignee: 'hervid' }), stderr: '' }; if (argv.includes('unblock')) return { returncode: 0, stdout: '', stderr: '' }; if (argv.includes('dispatch')) return { returncode: 0, stdout: JSON.stringify({ spawned: ['t_video_006'] }), stderr: '' }; throw new Error('unexpected command'); } };
+  const preflights = [];
+  try {
+    const runId = 'run_mkt_video006';
+    const prepared = env.controller.prepare({ commandId: 'telegram:901', workflow: 'video_production', runId, input: handoff });
+    env.controller.approveKickoff({ commandId: 'telegram:902', runId, packetSha256: prepared.kickoff_packet_sha256 });
+    new NativeKanbanAdapter({ controller: env.controller, client, profileHome: '/opt/data/hermes-profiles/hervid', board: 'marketing-video-staging', capturePreflight: (input) => { preflights.push(input); return { status: 'pass' }; } }).dispatchReadyTask({ runId });
+    assert.strictEqual(preflights.length, 1);
+    assert.strictEqual(calls.filter((argv) => argv.includes('create')).length, 1);
+    const targetRoot = path.join(env.root, 'artifacts', runId);
+    assert.deepStrictEqual(fs.readFileSync(path.join(targetRoot, 'approved-production-brief.json')), briefBytes);
+    assert.deepStrictEqual(fs.readFileSync(path.join(targetRoot, 'approved-capture-plan.json')), planBytes);
+    assert.match(calls[0][calls[0].indexOf('--body') + 1], /Run exactly: node .*capture-ep4-spec-workflow-demo.js/);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('Workflow B fails before native card creation when a Story Lock handoff lacks the pinned capture plan', () => {
+  const env = setup();
+  const client = { run() { throw new Error('native create must not be called'); } };
+  try {
+    const sourceRunId = 'run_mkt_source_missing_plan';
+    const sourceRoot = path.join(env.root, 'artifacts', sourceRunId);
+    const bytes = Buffer.from('{}\n');
+    fs.mkdirSync(sourceRoot, { recursive: true });
+    fs.writeFileSync(path.join(sourceRoot, 'production-brief.json'), bytes);
+    const handoff = { schema_version: 'sdtk.marketing-handoff.v1', workflow: 'research_and_story', episode_id: 'EP4', revision: 'r1', validation_status: 'pass', source_run_id: sourceRunId, approval: { gate: 'story_lock', status: 'approved', artifact_sha256: 'a'.repeat(64) }, outputs: [{ path: 'production-brief.json', sha256: crypto.createHash('sha256').update(bytes).digest('hex'), media_type: 'application/json' }] };
+    const runId = 'run_mkt_video_missing_plan';
+    const prepared = env.controller.prepare({ commandId: 'telegram:missing-plan', workflow: 'video_production', runId, input: handoff });
+    env.controller.approveKickoff({ commandId: 'telegram:missing-plan-kickoff', runId, packetSha256: prepared.kickoff_packet_sha256 });
+    const adapter = new NativeKanbanAdapter({ controller: env.controller, client, profileHome: '/opt/data/hermes-profiles/hervid', board: 'marketing-video-staging' });
+    assert.throws(() => adapter.dispatchReadyTask({ runId }), /approved handoff missing capture-plan.json/);
+    assert.strictEqual(env.controller.status(runId).tasks.capture_assets, undefined);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });

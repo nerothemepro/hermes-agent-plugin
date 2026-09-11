@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const { MarketingWorkflowController } = require('./controller');
+const { resolveEpisodeSeed } = require('./episode-seeds');
 
 const sha = (value) => crypto.createHash('sha256').update(value).digest('hex');
 function setup() {
@@ -258,5 +259,40 @@ test('Picture Lock materializes a video handoff bound to the exact Story Lock ar
     assert.strictEqual(completed.handoff.handoff.workflow, 'video_production');
     assert.deepStrictEqual(completed.handoff.handoff.inputs, [{ sha256: brief.approval.artifact_sha256 }]);
     assert.strictEqual(completed.handoff.handoff.approval.artifact_sha256, picture.state.tasks.assemble_video.envelope_sha256);
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('Story Lock rejects a research result that omits the controller-owned capture plan', () => {
+  const env = setup();
+  try {
+    const runId = 'run_research_capture_plan_001';
+    const prepared = env.controller.prepare({ commandId: 'tg:capture-plan', workflow: 'research_and_story', runId, input: resolveEpisodeSeed('EP4') });
+    env.controller.approveKickoff({ commandId: 'tg:capture-plan:kickoff', runId, packetSha256: prepared.kickoff_packet_sha256 });
+    env.controller.startTask({ runId, taskId: 'research_story', workerId: 'herresearch:1' });
+    const candidate = artifactResult(path.join(env.root, 'artifacts'), runId, 'research_story', 'production-brief.json');
+    assert.throws(() => env.controller.completeTask({ runId, candidate }), /capture-plan.json/);
+    assert.strictEqual(env.controller.status(runId).tasks.research_story.status, 'running');
+  } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
+});
+
+
+test('approved Story Lock handoff exposes the exact production brief and capture plan hashes', () => {
+  const env = setup();
+  try {
+    const runId = 'run_research_handoff_plan_001';
+    const seed = resolveEpisodeSeed('EP4');
+    const prepared = env.controller.prepare({ commandId: 'tg:handoff-plan', workflow: 'research_and_story', runId, input: seed });
+    env.controller.approveKickoff({ commandId: 'tg:handoff-plan:kickoff', runId, packetSha256: prepared.kickoff_packet_sha256 });
+    env.controller.startTask({ runId, taskId: 'research_story', workerId: 'herresearch:1' });
+    const brief = { schema_version: 'sdtk.marketing-production-brief.v1', episode_id: 'EP4', revision: 'r1', audience: seed.audience, pain_point: seed.pain_point, hook: 'Review it.', narration: 'Make decisions visible.', cta: seed.cta, shot_list: [{ id: 's1' }], claim_ledger: [{ claim: 'proof' }], evidence: ['episode-seed.json'] };
+    const result = resultFromFiles(path.join(env.root, 'artifacts'), runId, 'research_story', [
+      { path: 'production-brief.json', bytes: JSON.stringify(brief) + '\n', media_type: 'application/json' },
+      { path: 'capture-plan.json', bytes: JSON.stringify(seed.capture_plan) + '\n', media_type: 'application/json' },
+    ]);
+    const waiting = env.controller.completeTask({ runId, candidate: result });
+    const approved = env.controller.approveGate({ runId, gateId: 'story_lock', packetSha256: waiting.packet_sha256 });
+    assert.deepStrictEqual(approved.handoff.handoff.outputs.map((item) => item.path), ['production-brief.json', 'capture-plan.json']);
+    assert.ok(approved.handoff.handoff.source_run_id === runId);
   } finally { env.controller.close(); fs.rmSync(env.root, { recursive: true, force: true }); }
 });

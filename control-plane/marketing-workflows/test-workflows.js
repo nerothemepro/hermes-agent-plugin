@@ -2,7 +2,8 @@
 
 const assert = require('assert');
 const test = require('node:test');
-const { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff } = require('./workflows');
+const { WORKFLOW_DEFINITIONS, resolveWorkflow, validateHandoff, validateCapturePlan } = require('./workflows');
+const { resolveEpisodeSeed } = require('./episode-seeds');
 
 test('three workflows each have one Hermes owner and immutable input/output boundaries', () => {
   assert.deepStrictEqual(Object.keys(WORKFLOW_DEFINITIONS), ['research_and_story', 'video_production', 'social_distribution']);
@@ -26,4 +27,25 @@ test('video accepts only an approved research handoff and social requires pictur
   const picture = { ...brief, workflow: 'video_production', approval: { gate: 'picture_lock', status: 'approved', artifact_sha256: 'b'.repeat(64) } };
   assert.strictEqual(validateHandoff('social_distribution', picture).approval.gate, 'picture_lock');
   assert.throws(() => validateHandoff('social_distribution', brief), /approved picture_lock/);
+});
+
+
+test('capture plan is a bounded controller-owned demo contract', () => {
+  const plan = {
+    schema_version: 'sdtk.marketing-capture-plan.v1', episode_id: 'EP4', revision: 'r1',
+    data_classification: 'demo_only', runner_id: 'ep4_spec_workflow_demo',
+    artifacts: { capture: 'captures/ep4-spec-workflow-demo.mp4', receipt: 'receipts/ep4-spec-workflow-demo.txt' },
+    viewport: { width: 1440, height: 900 },
+  };
+  assert.deepStrictEqual(validateCapturePlan(plan), plan);
+  assert.throws(() => validateCapturePlan({ ...plan, runner_id: 'shell-anything' }), /unsupported capture runner/);
+  assert.throws(() => validateCapturePlan({ ...plan, artifacts: { ...plan.artifacts, capture: '/tmp/out.mp4' } }), /relative/);
+});
+
+
+test('EP4 seed pins the controller-owned demo capture runner', () => {
+  const seed = resolveEpisodeSeed('EP4');
+  assert.strictEqual(seed.capture_plan.runner_id, 'ep4_spec_workflow_demo');
+  assert.strictEqual(seed.capture_plan.data_classification, 'demo_only');
+  assert.strictEqual(seed.capture_plan.artifacts.capture, 'captures/ep4-spec-workflow-demo.mp4');
 });

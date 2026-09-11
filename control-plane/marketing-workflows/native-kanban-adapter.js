@@ -1,9 +1,10 @@
 'use strict';
 
 const crypto = require('crypto');
+const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { resolveWorkflow } = require('./workflows');
+const { resolveWorkflow, validateCapturePlan } = require('./workflows');
 
 const BOARD = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const NATIVE_TASK = /^t_[a-z0-9_]+$/;
@@ -36,6 +37,7 @@ class NativeKanbanAdapter {
     if (!BOARD.test(this.board)) throw new Error('invalid staging board');
     this.workflow = options.workflow || 'video_production';
     this.assignee = options.assignee || resolveWorkflow(this.workflow).owner;
+    this.capturePreflight = options.capturePreflight || null;
     if (this.assignee !== resolveWorkflow(this.workflow).owner) throw new Error('native adapter assignee does not match workflow owner');
   }
 
@@ -60,11 +62,56 @@ class NativeKanbanAdapter {
 
   _materializeHandoff(runId) {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    const input = this.controller.input(runId);
     const handoffPath = path.join(artifactRoot, 'approved-handoff.json');
-    const content = `${JSON.stringify(this.controller.input(runId), null, 2)}\n`;
+    const content = `${JSON.stringify(input, null, 2)}\n`;
     fs.mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
     fs.writeFileSync(handoffPath, content, { mode: 0o600 });
-    return { path: handoffPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), input: this.controller.input(runId) };
+    const result = { path: handoffPath, sha256: crypto.createHash('sha256').update(content).digest('hex'), input };
+    if (this.workflow !== 'video_production' || input.staging_smoke === true || !input.source_run_id) return result;
+    if (!/^run_[a-z0-9_]+$/.test(String(input.source_run_id))) throw new Error('approved source run id is invalid');
+    const sourceRoot = path.join(this.controller.artifactRoot, input.source_run_id);
+    const outputs = Array.isArray(input.outputs) ? input.outputs : [];
+    const expected = [
+      { source: 'production-brief.json', target: 'approved-production-brief.json' },
+      { source: 'capture-plan.json', target: 'approved-capture-plan.json' },
+    ];
+    const copied = {};
+    for (const item of expected) {
+      const output = outputs.find((candidate) => candidate?.path === item.source);
+      if (!output || !/^[a-f0-9]{64}$/.test(String(output.sha256 || ''))) throw new Error('approved handoff missing ' + item.source);
+      const source = path.resolve(sourceRoot, item.source);
+      if (!source.startsWith(sourceRoot + path.sep) || !fs.existsSync(source) || !fs.lstatSync(source).isFile()) throw new Error('approved source artifact is unavailable: ' + item.source);
+      const bytes = fs.readFileSync(source);
+      const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+      if (digest !== output.sha256) throw new Error('approved source artifact sha256 mismatch: ' + item.source);
+      const target = path.join(artifactRoot, item.target);
+      fs.writeFileSync(target, bytes, { mode: 0o600 });
+      copied[item.source] = { path: target, sha256: digest };
+    }
+    let plan;
+    try { plan = JSON.parse(fs.readFileSync(copied['capture-plan.json'].path, 'utf8')); } catch { throw new Error('approved capture plan is not valid JSON'); }
+    validateCapturePlan(plan);
+    if (plan.episode_id !== input.episode_id || plan.revision !== input.revision) throw new Error('approved capture plan identity does not match handoff');
+    result.capturePlan = { ...copied['capture-plan.json'], plan, runnerPath: path.join(__dirname, 'capture-ep4-spec-workflow-demo.js') };
+    result.productionBrief = copied['production-brief.json'];
+    return result;
+  }
+
+  _preflightCapture(runId, attempt, handoff) {
+    if (!handoff.capturePlan) return null;
+    const artifactRoot = path.join(this.controller.artifactRoot, runId);
+    let receipt;
+    if (this.capturePreflight) receipt = this.capturePreflight({ runId, attempt, artifactRoot, plan: handoff.capturePlan.plan, planPath: handoff.capturePlan.path, runnerPath: handoff.capturePlan.runnerPath });
+    else {
+      const result = childProcess.spawnSync(process.execPath, [handoff.capturePlan.runnerPath, '--root', artifactRoot, '--run-id', runId, '--attempt', String(attempt), '--preflight'], { encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024, env: process.env });
+      if (result.status !== 0) throw new Error('video capture preflight failed');
+      try { receipt = JSON.parse(String(result.stdout || '')); } catch { throw new Error('video capture preflight returned invalid JSON'); }
+    }
+    if (!receipt || receipt.status !== 'pass') throw new Error('video capture preflight did not pass');
+    const file = path.join(artifactRoot, 'capture-preflight.json');
+    fs.writeFileSync(file, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+    return { path: file, sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
   }
 
   _materializeResearchInstructions(runId, handoff, scaffold, attempt) {
@@ -105,6 +152,7 @@ class NativeKanbanAdapter {
       '- Keep episode_id, revision, audience, pain_point, and cta byte-for-byte equivalent to the supplied seed values.',
       '- Evidence invariant: evidence must remain exactly ["episode-seed.json"]. Do not add absolute paths, objects, inferred files, or new evidence.',
       '- Write production-brief.json in this workspace using schema sdtk.marketing-production-brief.v1.',
+      '- capture-plan.json is controller-owned and immutable. Do not edit, replace, or omit it; the finalizer binds it into Story Lock.',
       '- Include audience, pain_point, hook, narration, cta, shot_list, claim_ledger, and evidence.',
       `- Run exactly after production-brief.json is valid: node ${path.join(__dirname, 'research-finalizer-cli.js')} --root ${artifactRoot} --run-id ${runId} --attempt ${attempt} --seed-file episode-seed.json`,
       '- Do not handwrite worker-result.json; the deterministic finalizer creates it.',
@@ -120,8 +168,11 @@ class NativeKanbanAdapter {
     const artifactRoot = path.join(this.controller.artifactRoot, runId);
     const seedPath = path.join(artifactRoot, 'episode-seed.json');
     const templatePath = path.join(artifactRoot, 'production-brief.template.json');
+    const capturePlanPath = path.join(artifactRoot, 'capture-plan.json');
     const seed = handoff.input || {};
     fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2) + '\n', { mode: 0o600 });
+    if (!seed.capture_plan) throw new Error('episode seed capture plan is unavailable');
+    fs.writeFileSync(capturePlanPath, JSON.stringify(seed.capture_plan, null, 2) + '\n', { mode: 0o600 });
     const template = {
       schema_version: 'sdtk.marketing-production-brief.v1',
       episode_id: seed.episode_id,
@@ -136,7 +187,7 @@ class NativeKanbanAdapter {
       evidence: ['episode-seed.json'],
     };
     fs.writeFileSync(templatePath, JSON.stringify(template, null, 2) + '\n', { mode: 0o600 });
-    return { seedPath, templatePath };
+    return { seedPath, templatePath, capturePlanPath };
   }
 
   _materializeVideoContext(runId, taskId) {
@@ -170,6 +221,20 @@ class NativeKanbanAdapter {
       'Approved handoff: ' + handoff.path,
       'Approved handoff SHA-256: ' + handoff.sha256,
     ];
+    if (taskId === 'capture_assets' && handoff.capturePlan) {
+      return base.concat([
+        '',
+        'Task: capture_assets',
+        '- Controller-owned fixture only: all visible data must be labelled DEMO DATA and product behavior must come from the real local SDTK-WIKI runtime.',
+        '- Do not edit approved-production-brief.json or approved-capture-plan.json.',
+        'Approved capture plan: ' + handoff.capturePlan.path,
+        'Approved capture plan SHA-256: ' + handoff.capturePlan.sha256,
+        'Preflight receipt: ' + path.join(artifactRoot, 'capture-preflight.json'),
+        'Run exactly: node ' + handoff.capturePlan.runnerPath + ' --root ' + artifactRoot + ' --run-id ' + runId + ' --attempt ' + attempt,
+        '- The controller-owned runner writes the manifest and worker-result.json only after actual capture artifacts exist.',
+        '- Mark the native card complete only after the exact command exits 0.',
+      ]).join('\n') + '\n';
+    }
     if (taskId === 'capture_assets') {
       return base.concat([
         '',
@@ -300,8 +365,11 @@ class NativeKanbanAdapter {
       ? this._materializeResearchInstructions(runId, handoff, researchScaffold, attempt)
       : null;
     const captureContext = this._materializeVideoContext(runId, taskId);
+    const capturePreflight = this.workflow === 'video_production' && taskId === 'capture_assets' && handoff.input.staging_smoke !== true
+      ? this._preflightCapture(runId, attempt, handoff)
+      : null;
     const videoInstructions = this.workflow === 'video_production' && handoff.input.staging_smoke !== true
-      ? { content: this._materializeVideoInstructions(runId, taskId, attempt, handoff, captureContext) }
+      ? { content: this._materializeVideoInstructions(runId, taskId, attempt, handoff, captureContext), capturePreflight }
       : null;
     const socialInstructions = this.workflow === 'social_distribution' && handoff.input.staging_smoke !== true
       ? this._materializeSocialInstructions(runId, taskId, attempt, handoff)

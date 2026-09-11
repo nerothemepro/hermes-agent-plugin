@@ -21,7 +21,7 @@ function setup() {
   controller.releaseExternalTask({ runId, taskId: 'research_story', attempt: 1, nativeTaskId: 't_research_001' });
   const runRoot = path.join(root, 'artifacts', runId);
   fs.mkdirSync(runRoot, { recursive: true });
-  fs.writeFileSync(path.join(runRoot, 'episode-seed.json'), JSON.stringify(seed, null, 2) + '\n');
+  fs.writeFileSync(path.join(runRoot, 'episode-seed.json'), JSON.stringify(seed, null, 2) + '\n'); fs.writeFileSync(path.join(runRoot, 'capture-plan.json'), JSON.stringify(seed.capture_plan, null, 2) + '\n');
   return { root, controller, runId, seed, runRoot };
 }
 

@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('path');
+
 const HASH = /^[a-f0-9]{64}$/;
 
 const WORKFLOW_DEFINITIONS = Object.freeze({
@@ -55,6 +57,25 @@ function validateSocialInput(input) {
   return { brief, video };
 }
 
+function isRelativeArtifactPath(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && !path.isAbsolute(value)
+    && !value.split(/[\\/]+/).includes('..');
+}
+
+function validateCapturePlan(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema_version !== 'sdtk.marketing-capture-plan.v1') throw new Error('invalid capture plan');
+  if (!/^EP[0-9]+$/.test(String(value.episode_id || '')) || !/^r[1-9][0-9]*$/.test(String(value.revision || ''))) throw new Error('invalid capture plan identity');
+  if (value.data_classification !== 'demo_only') throw new Error('capture plan must be demo_only');
+  if (value.runner_id !== 'ep4_spec_workflow_demo') throw new Error('unsupported capture runner');
+  const artifacts = value.artifacts;
+  if (!artifacts || !isRelativeArtifactPath(artifacts.capture) || !isRelativeArtifactPath(artifacts.receipt)) throw new Error('capture plan artifact paths must be relative');
+  const viewport = value.viewport;
+  if (!viewport || !Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) || viewport.width < 640 || viewport.height < 360) throw new Error('invalid capture plan viewport');
+  return structuredClone(value);
+}
+
 function validateProductionBrief(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema_version !== 'sdtk.marketing-production-brief.v1') throw new Error('invalid production brief');
   if (!/^EP[0-9]+$/.test(String(value.episode_id || '')) || !/^r[1-9][0-9]*$/.test(String(value.revision || ''))) throw new Error('invalid production brief identity');
@@ -66,4 +87,4 @@ function validateProductionBrief(value) {
   }
   return structuredClone(value);
 }
-module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateProductionBrief, validateHandoff, validateSocialInput };
+module.exports = { WORKFLOW_DEFINITIONS, resolveWorkflow, validateCapturePlan, validateProductionBrief, validateHandoff, validateSocialInput };

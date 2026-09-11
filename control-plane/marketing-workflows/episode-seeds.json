@@ -22,7 +22,22 @@
         "English narration and caption script.",
         "A claim ledger with source-backed and forbidden claims.",
         "A shot list that names real product behaviors to capture."
-      ]
+      ],
+      "capture_plan": {
+        "schema_version": "sdtk.marketing-capture-plan.v1",
+        "episode_id": "EP4",
+        "revision": "r1",
+        "data_classification": "demo_only",
+        "runner_id": "ep4_spec_workflow_demo",
+        "artifacts": {
+          "capture": "captures/ep4-spec-workflow-demo.mp4",
+          "receipt": "receipts/ep4-spec-workflow-demo.txt"
+        },
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        }
+      }
     }
   ]
 }
