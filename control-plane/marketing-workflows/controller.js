@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { WorkflowKernel } = require('./kernel');
 const { finalizeTaskResult, canonicalJson } = require('./result-contract');
-const { resolveWorkflow, validateCapturePlan, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
+const { resolveWorkflow, validateCapturePlan, validateAssemblyPlan, validateProductionBrief, validateHandoff, validateSocialInput } = require('./workflows');
 const { validateVideoProductionResult } = require('./video-result-validator');
 const { validateSocialPreparationResult } = require('./social-result-validator');
 const { materializeApprovedHandoff } = require('./handoff-materializer');
@@ -220,6 +220,15 @@ class MarketingWorkflowController {
         try { plan = JSON.parse(fs.readFileSync(planPath, 'utf8')); } catch { throw new Error('capture plan is not valid JSON'); }
         validateCapturePlan(plan);
         if (canonicalJson(plan) !== canonicalJson(seed.capture_plan)) throw new Error('capture plan does not match episode seed');
+      }
+      if (seed.assembly_plan) {
+        const planArtifact = finalized.artifacts.find((artifact) => artifact.path === 'assembly-plan.json');
+        if (!planArtifact) throw new Error('research result must include assembly-plan.json');
+        const planPath = path.join(this.artifactRoot, input.runId, planArtifact.path);
+        let plan;
+        try { plan = JSON.parse(fs.readFileSync(planPath, 'utf8')); } catch { throw new Error('assembly plan is not valid JSON'); }
+        validateAssemblyPlan(plan);
+        if (canonicalJson(plan) !== canonicalJson(seed.assembly_plan)) throw new Error('assembly plan does not match episode seed');
       }
     }
     const videoEvidence = state.workflow === 'video_production' ? validateVideoProductionResult(finalized, state, { stagingSmoke: this.kernel.initialPayload(input.runId).staging_smoke === true }) : null;

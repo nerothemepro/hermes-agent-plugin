@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { validateCapturePlan, validateProductionBrief } = require('./workflows');
+const { validateCapturePlan, validateAssemblyPlan, validateProductionBrief } = require('./workflows');
 const { canonicalJson } = require('./result-contract');
 
 function requiredText(value, name) {
@@ -39,6 +39,17 @@ function assertCapturePlanBound(root, seed) {
   return file;
 }
 
+function assertAssemblyPlanBound(root, seed) {
+  if (!seed.assembly_plan) return null;
+  const file = contained(root, 'assembly-plan.json');
+  if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) throw new Error('assembly-plan.json is unavailable');
+  let plan;
+  try { plan = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new Error('assembly-plan.json is not valid JSON'); }
+  validateAssemblyPlan(plan);
+  if (canonicalJson(plan) !== canonicalJson(seed.assembly_plan)) throw new Error('assembly plan does not match episode seed');
+  return file;
+}
+
 function finalizeResearchBrief(input) {
   const root = path.resolve(requiredText(input.root, 'root'));
   const runId = requiredText(input.runId, 'run id');
@@ -53,8 +64,10 @@ function finalizeResearchBrief(input) {
   validateProductionBrief(brief);
   assertSeedBound(brief, seed);
   const capturePlanFile = assertCapturePlanBound(root, seed);
+  const assemblyPlanFile = assertAssemblyPlanBound(root, seed);
   const artifacts = [{ path: 'production-brief.json', sha256: digest(briefFile), media_type: 'application/json' }];
   if (capturePlanFile) artifacts.push({ path: 'capture-plan.json', sha256: digest(capturePlanFile), media_type: 'application/json' });
+  if (assemblyPlanFile) artifacts.push({ path: 'assembly-plan.json', sha256: digest(assemblyPlanFile), media_type: 'application/json' });
   const candidate = {
     schema_version: 'sdtk.video-task-result.v1',
     run_id: runId,

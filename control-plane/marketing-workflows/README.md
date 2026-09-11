@@ -64,7 +64,9 @@ The staging scripts are separate from the production router:
 
 EP4 no longer asks HerVid to invent a product-capture procedure. The owner-approved Story Lock now binds two artifacts: `production-brief.json` and `capture-plan.json`. The latter is an allowlisted `demo_only` plan for `ep4_spec_workflow_demo`.
 
-Before Workflow B creates a native HerVid card, the adapter verifies both source artifact hashes, copies them immutably into the Video Production run, and runs the runner's local preflight. A missing plan, changed hash, unavailable `sdtk-wiki`/`ffmpeg`/Chromium/Playwright runtime, or unsupported runner stops before card creation. It never retries an old failed card.
+Before Workflow B creates a native HerVid card, the adapter verifies the approved production brief, capture plan, and assembly plan hashes, then copies all three immutably into the Video Production run. A missing plan, changed hash, unavailable `sdtk-wiki`/`ffmpeg`/Chromium/Playwright runtime, or unsupported runner stops before card creation. It never retries an old failed card.
+
+The EP4 capture runner records populated Dashboard, Docs View, and Knowledge Graph surfaces from an isolated `DEMO DATA` fixture. It does not stretch an empty one-screen capture into a finished film. The separate assembly runner remains a later gated slice and must add narrated/captioned composition plus final quality evidence before Picture Lock.
 
 The runner creates a run-local `DEMO DATA` fixture, builds an SDTK-WIKI Atlas with the real CLI, records the actual local viewer through Chromium, normalizes it with FFmpeg, and invokes the existing video finalizer. It never reads or mutates a production repository.
 
